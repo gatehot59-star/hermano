@@ -1,0 +1,55 @@
+{
+ "_note": "Invented by the Hermano team for the offline demo. NOT Qloo data: real Qloo responses are never stored in this repository. The titles are real works; the links between them were invented by the team.",
+ "_content_ratings": {
+  "_note": "Typed by the team so the mock can imitate Qloo's filter.content_rating; they may be wrong. The real app never reads this table: Qloo filters on its side.",
+  "toy story": "G", "coco": "PG", "inside out": "PG", "the lego movie": "PG", "wreck-it ralph": "PG",
+  "encanto": "PG", "frozen": "PG", "high school musical": "TV-G", "fantastic beasts and where to find them": "PG-13",
+  "spirited away": "PG", "the neverending story": "PG", "spider-man: into the spider-verse": "PG",
+  "kung fu panda": "PG", "space jam": "PG", "goal!": "PG-13",
+  "peppa pig": "TV-Y", "puffin rock": "TV-Y", "gravity falls": "TV-Y7", "adventure time": "TV-PG",
+  "avatar: the last airbender": "TV-Y7", "merlin": "TV-PG", "naruto": "TV-PG", "one piece": "TV-14",
+  "pokémon": "TV-Y7", "ted lasso": "TV-MA"
+ },
+ "bluey": {
+  "book": ["Where the Wild Things Are", "The Little Prince", "Elmer"],
+  "artist": ["Canticuénticos", "Magdalena Fleitas", "Mariana Baggio"],
+  "tv_show": ["Peppa Pig", "Zamba", "Puffin Rock"],
+  "video_game": ["Animal Crossing: New Horizons", "Toca Life World", "Super Mario Bros. Wonder"],
+  "movie": ["Toy Story", "Coco", "Inside Out"]
+ },
+ "minecraft": {
+  "book": ["Diary of a Wimpy Kid", "Wonder", "The Chronicles of Narnia"],
+  "artist": ["C418", "Daft Punk", "Marshmello"],
+  "tv_show": ["Gravity Falls", "Adventure Time", "Zamba"],
+  "video_game": ["Terraria", "Roblox", "Stardew Valley"],
+  "movie": ["The Lego Movie", "Wreck-It Ralph", "Coco"]
+ },
+ "tini": {
+  "book": ["Matilda", "The Princess Diaries", "Wonder"],
+  "artist": ["Emilia", "Lali", "María Becerra"],
+  "tv_show": ["Violetta", "Soy Luna", "Floricienta"],
+  "video_game": ["Just Dance", "Animal Crossing: New Horizons", "The Sims 4"],
+  "movie": ["Encanto", "Frozen", "High School Musical"]
+ },
+ "harry potter": {
+  "book": ["Percy Jackson", "The Chronicles of Narnia", "Momo"],
+  "artist": ["John Williams", "Hans Zimmer", "Ludovico Einaudi"],
+  "tv_show": ["Merlin", "Avatar: The Last Airbender", "Gravity Falls"],
+  "video_game": ["The Legend of Zelda: Breath of the Wild", "Minecraft", "Ori and the Blind Forest"],
+  "movie": ["Fantastic Beasts and Where to Find Them", "Spirited Away", "The NeverEnding Story"]
+ },
+ "dragon ball": {
+  "book": ["One Piece (manga)", "Naruto (manga)", "Mafalda"],
+  "artist": ["Bizarrap", "Linkin Park", "Duki"],
+  "tv_show": ["Naruto", "One Piece", "Pokémon"],
+  "video_game": ["Dragon Ball FighterZ", "Pokémon Scarlet", "Rocket League"],
+  "movie": ["Spider-Man: Into the Spider-Verse", "Kung Fu Panda", "Dragon Ball Super: Broly"]
+ },
+ "lionel messi": {
+  "book": ["Futbolísimos", "Captain Tsubasa (manga)", "El Diego"],
+  "artist": ["La K'onga", "Abel Pintos", "Los Palmeras"],
+  "tv_show": ["Captain Tsubasa", "Inazuma Eleven", "Ted Lasso"],
+  "video_game": ["EA Sports FC 24", "Rocket League", "Football Manager"],
+  "movie": ["Kung Fu Panda", "Space Jam", "Goal!"]
+ }
+}

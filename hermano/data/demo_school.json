@@ -1,0 +1,53 @@
+{
+ "_note": "Invented school for the public demo. No real children, adults or schools. Supports are codes from the catalog in hermano/models.py.",
+ "school": {"en": "Demo school (invented data)", "es": "Escuela de demo (datos inventados)"},
+ "students": [
+  {"id": "s1", "alias": "Leo", "age": 8, "grade": {"en": "3rd grade", "es": "3° grado"}, "persona": "hermano",
+   "supports": ["warn_before_change", "one_instruction", "quiet_corner"],
+   "interests": [{"name": "Bluey", "kind": "tv_show"}, {"name": "Minecraft", "kind": "video_game"}]},
+  {"id": "s2", "alias": "Sofi", "age": 11, "grade": {"en": "6th grade", "es": "6° grado"}, "persona": "hermana",
+   "supports": ["movement_break", "split_tasks", "seat_away_from_door"],
+   "interests": [{"name": "Tini", "kind": "artist"}, {"name": "Harry Potter", "kind": "book"}]},
+  {"id": "s3", "alias": "Mati", "age": 14, "grade": {"en": "Year 2, secondary school", "es": "2° año"}, "persona": "hermano",
+   "supports": ["warn_before_speaking", "headphones_noisy_breaks"],
+   "interests": [{"name": "Dragon Ball", "kind": "tv_show"}, {"name": "Lionel Messi", "kind": "person"}]}
+ ],
+ "adults": [
+  {"id": "a1", "name": {"en": "3rd grade teacher (demo)", "es": "Docente de 3° (demo)"}, "role": "teacher", "student_ids": ["s1"]},
+  {"id": "a2", "name": {"en": "6th grade teacher (demo)", "es": "Docente de 6° (demo)"}, "role": "teacher", "student_ids": ["s2"]},
+  {"id": "a3", "name": {"en": "Year 2 teacher (demo)", "es": "Profesora de 2° año (demo)"}, "role": "teacher", "student_ids": ["s3"]},
+  {"id": "a4", "name": {"en": "Principal (demo)", "es": "Directora (demo)"}, "role": "principal", "student_ids": ["s1", "s2", "s3"]},
+  {"id": "a5", "name": {"en": "Leo's family (demo)", "es": "Familia de Leo (demo)"}, "role": "family", "student_ids": ["s1"]},
+  {"id": "a6", "name": {"en": "Sofi's family (demo)", "es": "Familia de Sofi (demo)"}, "role": "family", "student_ids": ["s2"]},
+  {"id": "a7", "name": {"en": "Mati's family (demo)", "es": "Familia de Mati (demo)"}, "role": "family", "student_ids": ["s3"]},
+  {"id": "a8", "name": {"en": "Educational psychologist (demo)", "es": "Psicopedagoga (demo)"}, "role": "specialist", "student_ids": ["s1", "s3"]},
+  {"id": "a9", "name": {"en": "Occupational therapist (demo)", "es": "Terapista ocupacional (demo)"}, "role": "specialist", "student_ids": ["s2"]}
+ ],
+ "schedules": {
+  "s1": [
+   {"start": "08:00", "end": "08:15", "activity": {"en": "arrival and greeting", "es": "la entrada y el saludo"}, "kind": "transition"},
+   {"start": "08:15", "end": "09:00", "activity": {"en": "Language", "es": "Lengua"}, "kind": "class", "topic": {"en": "animals", "es": "los animales"}},
+   {"start": "09:00", "end": "09:15", "activity": {"en": "recess", "es": "el recreo"}, "kind": "break"},
+   {"start": "09:15", "end": "10:00", "activity": {"en": "Math", "es": "Matemática"}, "kind": "class", "topic": {"en": "addition", "es": "las sumas"}},
+   {"start": "10:00", "end": "10:10", "activity": {"en": "the move to the Music room", "es": "el cambio al aula de Música"}, "kind": "transition"},
+   {"start": "10:10", "end": "10:50", "activity": {"en": "Music", "es": "Música"}, "kind": "special"},
+   {"start": "10:50", "end": "11:00", "activity": {"en": "dismissal", "es": "la salida"}, "kind": "transition"}
+  ],
+  "s2": [
+   {"start": "08:00", "end": "08:15", "activity": {"en": "arrival and greeting", "es": "la entrada y el saludo"}, "kind": "transition"},
+   {"start": "08:15", "end": "09:00", "activity": {"en": "Science", "es": "Ciencias Naturales"}, "kind": "class", "topic": {"en": "the solar system", "es": "el sistema solar"}},
+   {"start": "09:00", "end": "09:15", "activity": {"en": "recess", "es": "el recreo"}, "kind": "break"},
+   {"start": "09:15", "end": "10:00", "activity": {"en": "Language", "es": "Lengua"}, "kind": "class", "topic": {"en": "fantasy stories", "es": "el cuento fantástico"}},
+   {"start": "10:00", "end": "10:45", "activity": {"en": "PE", "es": "Educación Física"}, "kind": "special"},
+   {"start": "10:45", "end": "11:00", "activity": {"en": "dismissal", "es": "la salida"}, "kind": "transition"}
+  ],
+  "s3": [
+   {"start": "13:00", "end": "13:10", "activity": {"en": "arrival", "es": "la entrada"}, "kind": "transition"},
+   {"start": "13:10", "end": "14:30", "activity": {"en": "History", "es": "Historia"}, "kind": "class", "topic": {"en": "the May Revolution", "es": "la Revolución de Mayo"}},
+   {"start": "14:30", "end": "14:45", "activity": {"en": "recess", "es": "el recreo"}, "kind": "break"},
+   {"start": "14:45", "end": "16:05", "activity": {"en": "Math", "es": "Matemática"}, "kind": "class", "topic": {"en": "equations", "es": "las ecuaciones"}},
+   {"start": "16:05", "end": "16:20", "activity": {"en": "the oral presentation in Language class", "es": "la exposición oral en Lengua"}, "kind": "special"},
+   {"start": "16:20", "end": "16:30", "activity": {"en": "dismissal", "es": "la salida"}, "kind": "transition"}
+  ]
+ }
+}

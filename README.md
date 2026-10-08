@@ -1,46 +1,56 @@
 # Hermano
 
-**Hermano** (Spanish for *brother*) is an AI companion for children and teens with autism, ADHD and other support needs in inclusive public schools of Salta, northern Argentina. Each child picks a companion, *hermano* or *hermana* (sister), that walks them through the school day and keeps every adult around that child in sync: teachers, principals, families and the child's own specialists.
+**Hermano** (Spanish for *brother*) is a school-day companion for children and teens with support needs, such as autism or ADHD, in inclusive public schools of Salta, northern Argentina. Each child picks a companion, *hermano* or *hermana* (sister), that walks them through the school day, and every adult around that child gets the report they need: teachers, principals, families and the child's own specialists.
 
 Built for the [Qloo Agentic Hackathon](https://qloo.devpost.com/).
 
 ## Why
 
-In Argentina, a student with a disability in a mainstream school has an individual inclusion plan (PPI, Resolution CFE 311/16), written by the school team together with the family. A UNICEF Argentina study of 20 public schools (2020) found that 67% of school staff had clear guidelines for writing those plans, but only 53% for monitoring and evaluating them, and only 34% of students said they had taken part in any stage of their own plan.
+In Argentina, a student with a disability in a mainstream school has an individual inclusion plan (PPI, Resolution CFE 311/16), written by the school team together with the family. In a UNICEF Argentina study of 20 schools in 5 provinces (2020), 67% of the education actors consulted said they had clear guidelines for writing those plans, but only 53% for monitoring and evaluating them, and only 34% of the students said they had been invited to any stage of their own plan.
 
 Hermano works on that gap: the day-to-day follow-up, and the child's own voice.
 
 ## How it works
 
-1. An adult enters what the child likes: a show, a game, a band, a sport.
-2. **Qloo is the core.** Hermano looks each interest up with `/search` and asks `/v2/insights` for related books, artists, TV shows, video games and movies. A child who loves *Bluey* and *Minecraft* gets motivators from five domains, not one.
-3. For every block of the school day, Hermano prepares a first/then cue, a warning before each change, calm-down options and a reward taken from those tastes. It rotates rewards so they do not wear out, and suggests a reading close to the child's tastes for the topic of the class.
-4. At the end of the day the child says how each step went, with faces (pictograms next), on the family phone, a school tablet or their own phone.
-5. Each adult gets a different report, only about the children linked to them: practical notes for the teacher, an aggregate for the principal, plain language for the family, a structured log for the specialist.
+1. An adult enters what the child likes: a show, a game, a band, a sports star.
+2. **Qloo is the core.** Hermano looks each interest up with `/search` and asks `/v2/insights` for related books, artists, TV shows, video games and movies. Movies and shows are requested with `filter.content_rating` for the child's age, so Qloo itself keeps them age-appropriate.
+3. **Nothing new reaches the child without an adult's OK.** Qloo's ideas go first to the child's family or teacher. The ones they approve become the child's motivators; the ones they reject are left out of the next Qloo request with `filter.exclude.entities`. Games the team knows are rated above the child's age (ESRB) are never even proposed.
+4. For every block of the school day, Hermano prepares a first/then cue, a warning before each change and calm-down options. Rewards come only after classes, never after recess or at dismissal, and they rotate so they do not wear out.
+5. At the end of the day the child says how each step went, with faces.
+6. Each adult gets a different report, only about the children linked to them: practical notes and new ideas to approve for the teacher, an aggregate for the principal, plain language for the family, a structured log for the specialist.
 
-Without Qloo, every child would get the same generic routine.
+Without Qloo, every child would get the same generic routine: that is exactly what Hermano falls back to when Qloo does not answer.
 
-## Privacy by design
+## Privacy and safety by design
 
 - No cameras, no biometrics, and Hermano does not read the child's phone: the phone is the child's own window to Hermano.
-- Hermano stores supports ("needs a warning before changing activity"), never diagnoses. Health words are scrubbed from every report.
-- Only interest names and Qloo entity ids are sent to Qloo, never a child's name, id or supports (tested).
-- Every adult sees only their own children (tested).
-- The public demo uses invented students. `data/mock_taste.json` was invented by the team for offline work: it is **not** Qloo data, and real Qloo responses are never stored in this repository.
+- Supports come from a closed catalog ("a warning before every change of activity"). Hermano stores no diagnosis and no free-text notes, and health words are scrubbed from every report anyway (tested against the 31 terms of an earlier audit).
+- Only interest names go to Qloo. An interest that contains a child's name, a health word or contact data is refused before any request, and the Qloo client refuses health or contact text on its own (tested).
+- Every adult sees only their own children, and only the child's family or teacher can approve a motivator (tested).
+- Qloo answers can be cached privately on the server (`cache/`, git-ignored); they are never committed. `hermano/data/mock_taste.json` was invented by the team for offline work: it is **not** Qloo data.
+- The public demo uses invented students.
 
 ## Status
 
-Day-one skeleton, 8 October 2026: data model, Qloo client with an offline mock, day planner, rotation, check-ins and the four reports, with 17 tests. Next: the web views (child view for the phone, adult views), the LLM writer, adults approving new motivators before the child sees them, an English toggle for judges, and the hosted demo.
+8 October 2026, first batch after the first audit: the Qloo client follows the hackathon rules (hackathon base URL only, the `/search` type names, 404 read as "no results", retries on 429 and timeouts, private cache), plus the age gate, adult approval, the privacy guard, English and Spanish, and `pip install`. 58 tests.
+
+Not done yet, in this order: the agent layer (a language model that plans with these tools, under adult approval; today the planner is rule-based), the web views (the child's view for the phone, the adults' views), the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
+
+Known limits: titles without a US content rating (for example, local Argentine shows) are left out by the rating filter. The ESRB ratings for games are typed by the team. An interest that matches a child's name is refused even when it is also a real title. Suggested readings do not match the class topic yet.
 
 ## Run it
 
 Python 3.9 or newer, no dependencies.
 
 ```bash
-python -m unittest -v          # tests
-python -m hermano demo         # one day: plans and the report for every adult
-python -m hermano privacy      # everything that was sent to Qloo
+python -m unittest -v              # tests
+python -m hermano demo             # one day: plans, the child view and the report for every adult
+python -m hermano demo --lang es   # the same in Spanish
+python -m hermano demo --days 3    # three days; each family approves one new idea per day (simulated)
+python -m hermano privacy          # everything that was sent to Qloo
 ```
+
+Or install it with `pip install .` and run `hermano demo`.
 
 With a hackathon key, `export QLOO_API_KEY=...` and the same commands call `https://hackathon.api.qloo.com`. Never commit the key.
 

@@ -1,0 +1,6 @@
+{
+ "_note": "Invented for the demo: what each child's family or teacher already said yes or no to. Keys are domain:name.",
+ "s1": {"approved": ["book:where the wild things are", "artist:canticuénticos", "tv_show:peppa pig", "video_game:animal crossing: new horizons", "movie:toy story"], "rejected": []},
+ "s2": {"approved": ["book:matilda", "artist:lali", "tv_show:avatar: the last airbender", "video_game:animal crossing: new horizons", "movie:encanto"], "rejected": []},
+ "s3": {"approved": ["book:mafalda", "artist:bizarrap", "tv_show:naruto", "video_game:rocket league", "movie:kung fu panda"], "rejected": []}
+}

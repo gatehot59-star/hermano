@@ -1,172 +1,327 @@
-"""Core tests. Run with: python -m unittest -v"""
+"""Plans, reports, approvals and the age gate. Run with: python -m unittest -v"""
+import contextlib
+import io
 import json
+import os
 import re
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from hermano.agent import (FORBIDDEN_RE, REDACTED, Rotation, build_profile, plan_day,
-                           report_for, run_day, scrub)
-from hermano.models import Interest, Student, load_school
-from hermano.qloo import BASE_URL, MockQloo, QlooClient, urn
-
-DATA = Path(__file__).resolve().parent.parent / "data"
+from hermano.__main__ import main
+from hermano.agent import WORK_KINDS, Rotation, build_profile, plan_day, report_for, run_day
+from hermano.approvals import APPROVED, PENDING, REJECTED, Approvals
+from hermano.guard import contains_health
+from hermano.i18n import TEXT, q, t
+from hermano.models import SUPPORTS, Interest, Student, load_school, support_text
+from hermano.qloo import MockQloo, QlooClient
+from tests.helpers import DATA, ROOT, Recorder, http_error
 
 
 def word_in(word, text):
-    return re.search(r"\b" + re.escape(word) + r"\b", text, re.IGNORECASE) is not None
+    return re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text, re.IGNORECASE) is not None
 
 
-class FakeResp:
-    def __init__(self, payload):
-        self.payload = payload
-
-    def read(self):
-        return json.dumps(self.payload).encode("utf-8")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
+def real_client(rec):
+    return QlooClient("k-test", opener=rec, sleep=lambda s: None)
 
 
 class Base(unittest.TestCase):
     def setUp(self):
         self.school = load_school(DATA / "demo_school.json")
         self.qloo = MockQloo(DATA / "mock_taste.json")
+        self.approvals = Approvals.load(DATA / "demo_approvals.json")
 
+    def day(self, lang="en", day=0, rotation=None, profiles=None):
+        return run_day(self.school, self.qloo, rotation or Rotation(), self.approvals, day, profiles, lang)
 
-class TestQlooClient(unittest.TestCase):
-    def test_urn_rejects_unsupported_type(self):
-        with self.assertRaises(ValueError):
-            urn("music")
-
-    def test_client_needs_a_key(self):
-        with self.assertRaises(ValueError):
-            QlooClient("")
-
-    def test_insights_is_a_get_with_key_header_on_hackathon_url(self):
-        seen = {}
-
-        def opener(req, timeout):
-            seen["req"] = req
-            return FakeResp({"success": True, "results": {"entities": [{"name": "Matilda", "entity_id": "E1"}]}})
-
-        out = QlooClient("k-test", opener=opener).insights("book", ["A", "B"], take=3)
-        req = seen["req"]
-        self.assertEqual(req.get_method(), "GET")
-        self.assertEqual(req.get_header("X-api-key"), "k-test")
-        self.assertTrue(req.full_url.startswith(BASE_URL + "/v2/insights?"))
-        self.assertIn("filter.type=urn%3Aentity%3Abook", req.full_url)
-        self.assertIn("signal.interests.entities=A%2CB", req.full_url)
-        self.assertEqual(out, [{"name": "Matilda", "kind": "book", "id": "E1"}])
-
-    def test_search_returns_first_entity_id(self):
-        def opener(req, timeout):
-            return FakeResp({"results": [{"name": "Bluey", "entity_id": "Q1"}]})
-
-        self.assertEqual(QlooClient("k", opener=opener).search("Bluey", "tv_show"), "Q1")
+    def report(self, adult_id, records, lang="en"):
+        return report_for(self.school.adults[adult_id], self.school, records, lang)
 
 
 class TestPrivacy(Base):
     def test_only_interest_names_reach_qloo(self):
-        for st in self.school.students.values():
-            build_profile(st, self.qloo)
+        self.day()
         sent = "\n".join(self.qloo.sent)
         self.assertTrue(sent)
         for st in self.school.students.values():
             self.assertFalse(word_in(st.alias, sent), st.alias)
             self.assertFalse(word_in(st.id, sent), st.id)
-            for sup in st.supports:
-                self.assertNotIn(sup.lower(), sent.lower())
+            for code in st.supports:
+                self.assertNotIn(code, sent)
+                for lang in ("en", "es"):
+                    self.assertNotIn(support_text(code, lang).lower(), sent.lower())
+
+    def test_free_text_with_names_or_health_never_reaches_qloo(self):
+        rec = Recorder()
+        kid = Student(id="s1", alias="Leo", age=8, grade="3", persona="hermano", supports=[],
+                      interests=[Interest("Leo Gomez y su TEA", "tv_show"), Interest("Sofi y Leo", "tv_show"),
+                                 Interest("Bluey", "tv_show")])
+        prof = build_profile(kid, real_client(rec), self.school.roster(), self.approvals)
+        urls = rec.urls()
+        self.assertTrue(any("Bluey" in u for u in urls))
+        for u in urls:
+            for bad in ("Leo", "Sofi", "TEA"):
+                self.assertFalse(word_in(bad, u), (bad, u))
+        self.assertEqual(sorted(prof.refused), ["child name", "health detail"])
+
+    def test_supports_come_from_the_catalog_only(self):
+        raw = json.loads((DATA / "demo_school.json").read_text(encoding="utf-8"))
+        raw["students"][0]["supports"] = ["toma metilfenidato a las 10"]
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "school.json"
+            p.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError) as cm:
+                load_school(p)
+            self.assertNotIn("metilfenidato", str(cm.exception))
+
+    def test_unsafe_interests_stop_the_school_from_loading(self):
+        raw = json.loads((DATA / "demo_school.json").read_text(encoding="utf-8"))
+        raw["students"][0]["interests"].append({"name": "lo que mira Sofi", "kind": "tv_show"})
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "school.json"
+            p.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_school(p)
+
+
+class TestReports(Base):
+    def test_each_role_gets_a_different_report(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            self.assertEqual(len({self.report(a, records, lang) for a in ("a1", "a4", "a5", "a8")}), 4)
+
+    def test_adults_only_see_their_own_children(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            r = self.report("a1", records, lang)
+            self.assertTrue(word_in("Leo", r))
+            self.assertFalse(word_in("Sofi", r))
+            self.assertFalse(word_in("Mati", r))
+            r = self.report("a9", records, lang)
+            self.assertTrue(word_in("Sofi", r))
+            self.assertFalse(word_in("Leo", r))
+
+    def test_health_words_never_reach_a_report_even_if_typed(self):
+        # An adult typed health words into a class name and a topic: no report may carry them.
+        self.school.schedules["s1"][1].activity = {"en": "Language (ADHD support)", "es": "Lengua (apoyo por TEA)"}
+        self.school.schedules["s2"][1].topic = {"en": "the solar system and autism", "es": "el sistema solar y el autismo"}
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            for adult in self.school.adults.values():
+                self.assertFalse(contains_health(self.report(adult.id, records, lang)), (lang, adult.id))
+
+    def test_family_report_is_plain_language(self):
+        for lang, jargon in (("es", ("motivador", "autoinforme", "|")), ("en", ("motivator", "self-report", "|"))):
+            records, _ = self.day(lang)
+            r = self.report("a5", records, lang)
+            for j in jargon:
+                self.assertNotIn(j, r)
+        records, _ = self.day("es")
+        self.assertIn("Para charlar en casa", self.report("a5", records, "es"))
+
+    def test_principal_report_is_aggregate(self):
+        records, _ = self.day("es")
+        r = self.report("a4", records, "es")
+        self.assertIn("Chicos acompa\u00f1ados: 3", r)
+        self.assertIn("Momentos registrados: 19", r)
+        records, _ = self.day("en")
+        self.assertIn("Children supported: 3", self.report("a4", records, "en"))
 
 
 class TestPlan(Base):
-    def test_every_block_has_a_first_then_cue_and_a_reward(self):
-        records, _ = run_day(self.school, self.qloo, Rotation())
+    def test_rewards_only_after_classes_never_after_recess_or_dismissal(self):
+        records, _ = self.day()
         for rec in records.values():
-            for s in rec["plan"]["steps"]:
-                self.assertTrue(s.first_then.startswith("Primero: "))
-                self.assertTrue(s.reward)
-                self.assertTrue(s.calm)
+            steps = rec["plan"]["steps"]
+            for i, s in enumerate(steps):
+                self.assertTrue(s.first_then.startswith("First: "))
+                if s.block.kind in WORK_KINDS:
+                    self.assertTrue(s.reward, s.first_then)
+                else:
+                    self.assertEqual((s.reward, s.reward_item), ("", ""), s.first_then)
+                    nxt = steps[i + 1].activity if i + 1 < len(steps) else "home"
+                    self.assertTrue(s.first_then.endswith(f"Then: {nxt}."), s.first_then)
 
     def test_a_warning_before_every_change(self):
-        records, _ = run_day(self.school, self.qloo, Rotation())
+        records, _ = self.day()
         steps = records["s1"]["plan"]["steps"]
         self.assertEqual(steps[0].warning, "")
         self.assertTrue(all(s.warning for s in steps[1:]))
 
     def test_motivators_come_from_several_domains(self):
-        records, _ = run_day(self.school, self.qloo, Rotation())
-        domains = {s.reward_domain for s in records["s1"]["plan"]["steps"]}
+        rotation, profiles, domains = Rotation(), None, set()
+        for day in range(2):
+            records, profiles = self.day(day=day, rotation=rotation, profiles=profiles)
+            domains |= {s.reward_domain for s in records["s1"]["plan"]["steps"] if s.reward_domain}
         self.assertGreaterEqual(len(domains), 3)
 
     def test_rotation_keeps_rewards_fresh_across_days(self):
         rotation, profiles, seen = Rotation(), None, []
         for day in range(3):
-            records, profiles = run_day(self.school, self.qloo, rotation, day, profiles)
-            seen += [s.reward for s in records["s1"]["plan"]["steps"]]
-        first_cycle = seen[:len(profiles["s1"].pool())]
-        self.assertEqual(len(first_cycle), len(set(first_cycle)))
+            records, profiles = self.day(day=day, rotation=rotation, profiles=profiles)
+            seen += [s.reward_item for s in records["s1"]["plan"]["steps"] if s.reward_item]
+        n = sum(1 for c in profiles["s1"].pool() if self.approvals.status("s1", c.domain, c.name) == APPROVED)
+        self.assertGreaterEqual(n, 3)
+        self.assertEqual(len(seen[:n]), len(set(seen[:n])))
 
     def test_the_child_picks_hermano_or_hermana(self):
-        for sid, expected in (("s1", "Soy tu hermano"), ("s2", "Soy tu hermana")):
-            st = self.school.students[sid]
-            plan = plan_day(st, self.school.schedules[sid], build_profile(st, self.qloo), Rotation())
-            self.assertTrue(plan["greeting"].startswith(expected))
+        for lang, he, she in (("es", "Soy tu hermano", "Soy tu hermana"), ("en", "I'm your hermano", "I'm your hermana")):
+            records, _ = self.day(lang)
+            self.assertTrue(records["s1"]["plan"]["greeting"].startswith(he))
+            self.assertTrue(records["s2"]["plan"]["greeting"].startswith(she))
 
     def test_a_child_without_qloo_matches_still_gets_a_plan(self):
-        st = Student(id="x", alias="Nadie", age=9, grade="4°", persona="hermana", supports=[],
+        st = Student(id="x", alias="Nadie", age=9, grade="4", persona="hermana", supports=[],
                      interests=[Interest("Algo que no existe", "tv_show")])
-        plan = plan_day(st, self.school.schedules["s1"], build_profile(st, self.qloo), Rotation())
-        self.assertTrue(all(s.reward for s in plan["steps"]))
+        prof = build_profile(st, self.qloo, ["Nadie"], self.approvals)
+        plan = plan_day(st, self.school.schedules["s1"], prof, Rotation(), self.approvals)
+        self.assertTrue(all(s.reward for s in plan["steps"] if s.block.kind in WORK_KINDS))
+
+    def test_no_health_words_in_the_demo_plans(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            for rec in records.values():
+                plan = rec["plan"]
+                text = " ".join([plan["greeting"]] + [s.first_then + s.warning + s.reading for s in plan["steps"]])
+                self.assertFalse(contains_health(text))
 
 
-class TestReports(Base):
+class TestSafety(Base):
+    def test_nothing_unapproved_reaches_the_child(self):
+        for lang in ("en", "es"):
+            records, profiles = self.day(lang)
+            for sid, rec in records.items():
+                steps = rec["plan"]["steps"]
+                for s in steps:
+                    if s.reward_item:
+                        self.assertEqual(self.approvals.status(sid, s.reward_domain, s.reward_item), APPROVED)
+                child = " ".join(s.first_then + " " + " ".join(s.calm) for s in steps)
+                pending = [c for c in profiles[sid].pool() if self.approvals.status(sid, c.domain, c.name) == PENDING]
+                self.assertTrue(pending)
+                for c in pending:
+                    shown = c.name if c.domain == "artist" else q(lang, c.name)
+                    self.assertFalse(word_in(shown, child), (sid, c.name))
+
+    def test_new_ideas_wait_for_the_family_or_the_teacher(self):
+        records, _ = self.day("en")
+        first = records["s1"]["plan"]["pending"][0].name
+        family, teacher, specialist = (self.report(a, records) for a in ("a5", "a1", "a8"))
+        self.assertIn("waiting for your OK", family)
+        self.assertIn(first, family)
+        self.assertIn(first, teacher)
+        self.assertNotIn("waiting for your OK", specialist)
+
+    def test_only_the_childs_family_or_teacher_can_approve(self):
+        a = self.school.adults
+        for adult_id in ("a4", "a8", "a2", "a6"):  # principal, specialist, other teacher, other family
+            with self.assertRaises(PermissionError):
+                self.approvals.decide(a[adult_id], "s1", "book", "Elmer", True)
+        self.approvals.decide(a["a1"], "s1", "book", "Elmer", True)
+        self.assertEqual(self.approvals.status("s1", "book", "Elmer"), APPROVED)
+        self.approvals.decide(a["a5"], "s1", "book", "Elmer", False, "E-elmer")
+        self.assertEqual(self.approvals.status("s1", "book", "Elmer"), REJECTED)
+
+    def test_a_no_is_sent_to_qloo_as_an_exclusion(self):
+        self.approvals.decide(self.school.adults["a5"], "s1", "book", "Elmer", False, "E-elmer")
+        rec = Recorder()
+        build_profile(self.school.students["s1"], real_client(rec), self.school.roster(), self.approvals)
+        insights = [u for u in rec.urls() if "/v2/insights" in u]
+        self.assertTrue(insights)
+        self.assertTrue(all("filter.exclude.entities=E-elmer" in u for u in insights))
+
+    def test_games_rated_above_the_childs_age_are_never_proposed(self):
+        prof = build_profile(self.school.students["s1"], self.qloo, self.school.roster(), self.approvals)  # Leo, 8
+        names = {c.name for c in prof.pool()}
+        for game in ("Terraria", "Roblox"):  # ESRB T, found by audit 2026-10-08-11
+            self.assertNotIn(game, names)
+            self.assertIn(("video_game", game), prof.blocked)
+        self.assertIn("Animal Crossing: New Horizons", names)
+
+    def test_movies_and_shows_are_asked_for_the_childs_age(self):
+        rec = Recorder()
+        build_profile(self.school.students["s1"], real_client(rec), self.school.roster(), self.approvals)
+        by_type = {}
+        for i in range(len(rec.requests)):
+            p = rec.params(i)
+            if "filter.type" in p:
+                by_type[p["filter.type"][0]] = p
+        self.assertEqual(by_type["urn:entity:movie"]["filter.content_rating"],
+                         ["G,TV-Y,TV-G,PG,TV-Y7,TV-Y7-FV,TV-PG"])
+        self.assertNotIn("PG-13", by_type["urn:entity:tv_show"]["filter.content_rating"][0].split(","))
+        self.assertNotIn("filter.content_rating", by_type["urn:entity:video_game"])
+        mati = build_profile(self.school.students["s3"], self.qloo, self.school.roster(), self.approvals)  # 14
+        shows = {c.name for c in mati.pool() if c.domain == "tv_show"}
+        self.assertNotIn("Ted Lasso", shows)  # TV-MA in the mock
+        self.assertIn("One Piece", shows)  # TV-14 in the mock
+
+
+class TestRobustness(Base):
+    def test_qloo_down_means_a_generic_plan_not_a_crash(self):
+        rec = Recorder(lambda r: http_error(r.full_url, 429))
+        records, profiles = run_day(self.school, real_client(rec), Rotation(), self.approvals)
+        for sid, rec_ in records.items():
+            self.assertTrue(profiles[sid].degraded)
+            for s in rec_["plan"]["steps"]:
+                if s.block.kind in WORK_KINDS:
+                    self.assertEqual(s.reward, t("en", "reward.default"))
+
+
+class TestLanguages(unittest.TestCase):
     def setUp(self):
-        super().setUp()
-        self.records, _ = run_day(self.school, self.qloo, Rotation())
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("QLOO_API_KEY", None)
 
-    def report(self, adult_id):
-        return report_for(self.school.adults[adult_id], self.school, self.records)
+    def run_main(self, *args):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(list(args))
+        return rc, buf.getvalue()
 
-    def test_each_role_gets_a_different_report(self):
-        texts = {self.report(a) for a in ("a1", "a4", "a5", "a8")}
-        self.assertEqual(len(texts), 4)
+    def test_english_is_the_default_and_spanish_is_one_flag_away(self):
+        rc, out = self.run_main("demo")
+        self.assertEqual(rc, 0)
+        self.assertIn("First: ", out)
+        self.assertNotIn("Primero: ", out)
+        rc, out = self.run_main("demo", "--lang", "es")
+        self.assertEqual(rc, 0)
+        self.assertIn("Primero: ", out)
+        self.assertNotIn("First: ", out)
 
-    def test_adults_only_see_their_own_children(self):
-        t = self.report("a1")
-        self.assertTrue(word_in("Leo", t))
-        self.assertFalse(word_in("Sofi", t))
-        self.assertFalse(word_in("Mati", t))
-        t = self.report("a9")
-        self.assertTrue(word_in("Sofi", t))
-        self.assertFalse(word_in("Leo", t))
+    def test_every_text_exists_in_both_languages(self):
+        self.assertEqual(set(TEXT["en"]), set(TEXT["es"]))
+        for code, text in SUPPORTS.items():
+            self.assertEqual(set(text), {"en", "es"}, code)
 
-    def test_no_health_or_diagnosis_words_anywhere(self):
-        for adult in self.school.adults.values():
-            self.assertIsNone(FORBIDDEN_RE.search(report_for(adult, self.school, self.records)), adult.id)
-        for rec in self.records.values():
-            plan = rec["plan"]
-            text = " ".join([plan["greeting"]] + [s.first_then + s.warning + s.reading for s in plan["steps"]])
-            self.assertIsNone(FORBIDDEN_RE.search(text))
+    def test_three_day_demo_with_simulated_approvals(self):
+        rc, out = self.run_main("demo", "--days", "3")
+        self.assertEqual(rc, 0)
+        self.assertIn("(simulated)", out)
+        self.assertIn("=== Day 3", out)
 
-    def test_scrub_removes_health_words(self):
-        out = scrub("Tiene TEA y TDAH, con diagnóstico de autismo. Le gusta el teatro.")
-        self.assertIsNone(FORBIDDEN_RE.search(out))
-        self.assertIn(REDACTED, out)
-        self.assertIn("teatro", out)
 
-    def test_family_report_is_plain_language(self):
-        t = self.report("a5")
-        for jargon in ("motivador", "autoinforme", "|"):
-            self.assertNotIn(jargon, t)
-        self.assertIn("Para charlar en casa", t)
+class TestRepo(unittest.TestCase):
+    def test_gitignore_keeps_qloo_answers_and_secrets_out(self):
+        lines = (ROOT / ".gitignore").read_text(encoding="utf-8").split()
+        self.assertIn("cache/", lines)
+        self.assertIn(".env", lines)
 
-    def test_principal_report_is_aggregate(self):
-        t = self.report("a4")
-        self.assertIn("Chicos acompañados: 3", t)
-        self.assertIn("Momentos registrados: 19", t)
+    def test_code_uses_only_documented_endpoints_on_the_hackathon_host(self):
+        for p in (ROOT / "hermano").glob("*.py"):
+            src = p.read_text(encoding="utf-8")
+            self.assertNotRegex(src, r"/recs\b|/recommendations", p.name)
+            self.assertNotRegex(src, r"(?<!hackathon\.)api\.qloo\.com", p.name)
+
+    def test_data_ships_inside_the_package(self):
+        for f in ("demo_school.json", "mock_taste.json", "demo_approvals.json", "game_ratings.json"):
+            self.assertTrue((DATA / f).is_file(), f)
+
+    def test_the_mock_says_it_is_not_qloo_data(self):
+        raw = json.loads((DATA / "mock_taste.json").read_text(encoding="utf-8"))
+        self.assertIn("NOT Qloo data", raw["_note"])
 
 
 if __name__ == "__main__":
