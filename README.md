@@ -32,9 +32,11 @@ Without Qloo, every child would get the same generic routine: that is exactly wh
 
 ## Status
 
-8 October 2026, first batch after the first audit: the Qloo client follows the hackathon rules (hackathon base URL only, the `/search` type names, 404 read as "no results", retries on 429 and timeouts, private cache), plus the age gate, adult approval, the privacy guard, English and Spanish, and `pip install`. 58 tests.
+8 October 2026, first batch after the first audit: the Qloo client follows the hackathon rules (hackathon base URL only, the `/search` type names, 404 read as "no results", retries on 429 and timeouts, private cache), plus the age gate, adult approval, the privacy guard, English and Spanish, and `pip install`.
 
-Not done yet, in this order: the agent layer (a language model that plans with these tools, under adult approval; today the planner is rule-based), the web views (the child's view for the phone, the adults' views), the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
+Second batch, same day: `hermano/llm.py`, the language model client. Model: Qwen3.8-27B on Groq (`qwen/qwen3.8-27b`, a Groq Preview model), falling back to `openai/gpt-oss-20b` and then to the rule-based planner. Every message is checked before it leaves: health words, contact data or a real name stop the request, so the model only sees placeholders such as STUDENT_1. It includes a small tool loop with a step limit. Tested against a fake Groq only; no call to the real API yet. 74 tests.
+
+Not done yet, in this order: wiring the tool loop into the planner (the model proposes, an adult approves, the child's view never calls the model), the web views (the child's view for the phone, the adults' views), the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
 
 Known limits: titles without a US content rating (for example, local Argentine shows) are left out by the rating filter. The ESRB ratings for games are typed by the team. An interest that matches a child's name is refused even when it is also a real title. Suggested readings do not match the class topic yet.
 
@@ -53,6 +55,8 @@ python -m hermano privacy          # everything that was sent to Qloo
 Or install it with `pip install .` and run `hermano demo`.
 
 With a hackathon key, `export QLOO_API_KEY=...` and the same commands call `https://hackathon.api.qloo.com`. Never commit the key.
+
+With a Groq key, `export GROQ_API_KEY=...` turns the language model on; `HERMANO_MODELS` (comma separated) changes the model order. Without it, Hermano uses its rule-based planner.
 
 ## Credits
 
