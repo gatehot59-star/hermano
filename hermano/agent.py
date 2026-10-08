@@ -7,7 +7,8 @@ and calm-down options, and rotate so they stay fresh. At the end of the day the 
 each step went, and every adult linked to that child gets a different report. Hermano never
 diagnoses, and health words are scrubbed from every report.
 
-Today the planner is rule-based; the language-model layer comes next.
+The rule-based planner here always runs first. planner.py lets a language model choose among
+adult-approved ideas and suggest new ones for an adult to approve, all checked in code.
 """
 from __future__ import annotations
 
@@ -220,7 +221,14 @@ def _pairs(records: Dict, sid: str):
 
 
 def _pending_line(lang: str, key: str, records: Dict, sid: str, alias: str = "") -> str:
-    ideas = records[sid]["plan"]["pending"][:3]
+    plan = records[sid]["plan"]
+    if plan.get("suggested"):  # the language model's picks, with its reason, for adults only
+        items = "; ".join(
+            f"{_show(lang, s['candidate'].domain, s['candidate'].name)} "
+            f"({t(lang, 'domain.' + s['candidate'].domain)}): {s['reason'].rstrip('. ')}"
+            for s in plan["suggested"])
+        return t(lang, key.replace("pending.", "suggested."), items=items, alias=alias)
+    ideas = plan["pending"][:3]
     if not ideas:
         return ""
     items = ", ".join(f"{_show(lang, c.domain, c.name)} ({t(lang, 'domain.' + c.domain)})" for c in ideas)
@@ -331,15 +339,18 @@ def report_for(adult: Adult, school: School, records: Dict, lang: str = DEFAULT_
 
 
 def run_day(school: School, qloo, rotation: Rotation, approvals: Approvals, day: int = 0,
-            profiles: Optional[Dict[str, TasteProfile]] = None, lang: str = DEFAULT_LANG):
-    """Plan and (invented) check-ins for every child; returns (records, profiles)."""
+            profiles: Optional[Dict[str, TasteProfile]] = None, lang: str = DEFAULT_LANG,
+            planner=None):
+    """Plan and (invented) check-ins for every child; returns (records, profiles).
+    planner has plan_day's signature; planner.llm_plan_day adds the language model."""
+    planner = planner or plan_day
     if profiles is None:
         roster = school.roster()
         profiles = {sid: build_profile(st, qloo, roster, approvals)
                     for sid, st in school.students.items()}
     records = {}
     for sid, st in school.students.items():
-        plan = plan_day(st, school.schedules[sid], profiles[sid], rotation, approvals, lang)
+        plan = planner(st, school.schedules[sid], profiles[sid], rotation, approvals, lang)
         records[sid] = {"plan": plan, "checkins": demo_checkins(st, plan, day)}
     return records, profiles
 

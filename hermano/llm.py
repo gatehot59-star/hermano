@@ -24,7 +24,7 @@ import urllib.request
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 from . import USER_AGENT
-from .guard import UnsafeText, contains_contact, contains_health
+from .guard import UnsafeText, contains_contact_run, contains_health
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 PRIMARY_MODEL = "qwen/qwen3.8-27b"
@@ -42,6 +42,15 @@ def _tool_use_failed(error: urllib.error.HTTPError) -> bool:
     except (ValueError, OSError, AttributeError):
         return False
     return isinstance(body, dict) and (body.get("error") or {}).get("code") == "tool_use_failed"
+
+
+def _retry_delay(error: urllib.error.HTTPError, attempt: int) -> float:
+    """Groq's Retry-After when it sends one (capped at 20 s), else 2 s, 4 s, ..."""
+    try:
+        value = float((error.headers or {}).get("retry-after", ""))
+    except (TypeError, ValueError):
+        value = 2.0 * (attempt + 1)
+    return min(max(value, 0.0), 20.0)
 
 
 class LLMUnavailable(Exception):
@@ -68,7 +77,7 @@ def check_outgoing(messages: Sequence[dict], forbidden: Iterable[str] = ()) -> N
         text = "\n".join(p if isinstance(p, str) else json.dumps(p) for p in parts)
         if contains_health(text):
             raise UnsafeText("health detail in a message for the language model")
-        if contains_contact(text):
+        if contains_contact_run(text):
             raise UnsafeText("contact data in a message for the language model")
         for n in names:
             if re.search(r"(?<!\w)" + re.escape(n) + r"(?!\w)", text, re.IGNORECASE):
@@ -128,7 +137,7 @@ class GroqChat:
                     errors.append(f"{model}: {e.code}")
                     again = e.code in RETRY_STATUS or (e.code == 400 and _tool_use_failed(e))
                     if again and attempt < self.retries:
-                        self.sleep(2.0 * (attempt + 1))
+                        self.sleep(_retry_delay(e, attempt))
                         continue
                     break  # 4xx or retries spent: next model
                 except (urllib.error.URLError, socket.timeout, TimeoutError) as e:

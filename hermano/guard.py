@@ -3,7 +3,8 @@
 1. Only interest names go to Qloo, never a child's name, id or supports, and never text that
    looks like health or contact data. The Qloo client refuses that text by itself too.
 2. Reports never carry health words, even if an adult typed one somewhere.
-3. When a language model is added, it will see placeholders (STUDENT_1), never names.
+3. The language model sees placeholders (STUDENT_1), never names; llm.py checks every message
+   before it leaves.
 """
 from __future__ import annotations
 
@@ -65,6 +66,18 @@ def contains_contact(text: str) -> bool:
     if _EMAIL.search(text) or _URL.search(text):
         return True
     return sum(c.isdigit() for c in text) >= 6
+
+
+# A phone or document number written as one run: 7 or more digits, maybe with spaces, dots,
+# dashes or parentheses between them ("387 555-1234", "30.123.456"). For long structured text
+# such as language-model messages, where the 6-digit rule above would also catch ids like B1..B7.
+_NUMBER_RUN = re.compile(r"\+?\d(?:[\s().-]*\d){6,}")
+
+
+def contains_contact_run(text: str) -> bool:
+    """An e-mail, a web address, or a run of 7 or more digits."""
+    text = text or ""
+    return bool(_EMAIL.search(text) or _URL.search(text) or _NUMBER_RUN.search(text))
 
 
 def scrub(text: str, lang: str = "en") -> str:

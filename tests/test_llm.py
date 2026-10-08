@@ -72,6 +72,14 @@ class ClientTest(unittest.TestCase):
         self.assertEqual([body(r)["model"] for r in self.net.requests], [llm.PRIMARY_MODEL] * 2)
         self.assertEqual(len(self.sleeps), 1)
 
+    def test_429_waits_what_groq_says_capped(self):
+        for header, wait in (("7", 7.0), ("600", 20.0)):
+            e = urllib.error.HTTPError(llm.GROQ_URL, 429, "slow down", {"retry-after": header},
+                                       io.BytesIO(b"{}"))
+            c = self.make(script(e, text_reply("fine")))
+            c.chat(MSG)
+            self.assertEqual(self.sleeps, [wait])
+
     def test_bad_tool_generation_is_retried_other_400_is_not(self):
         # Groq answers 400 tool_use_failed when the model misnames a tool (seen with gpt-oss-20b).
         bad = urllib.error.HTTPError(llm.GROQ_URL, 400, "bad", {}, io.BytesIO(json.dumps(
@@ -106,6 +114,16 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(UnsafeText):
             c.chat([{"role": "user", "content": "write to mom@example.com"}])
         self.assertEqual(self.net.requests, [])
+
+    def test_phone_or_document_never_leaves_block_ids_do(self):
+        c = self.make(lambda r: text_reply())
+        for text in ("call 387 555-1234", "DNI 30.123.456", "+54 9 387 5551234"):
+            with self.assertRaises(UnsafeText):
+                c.chat([{"role": "user", "content": text}])
+        self.assertEqual(self.net.requests, [])
+        c.chat([{"role": "tool", "tool_call_id": "c1", "content": json.dumps(
+            {"age": 8, "blocks": [{"id": f"B{i}", "start": "08:15"} for i in range(1, 8)]})}])
+        self.assertEqual(len(self.net.requests), 1)
 
     def test_real_name_never_leaves_placeholder_does(self):
         c = self.make(lambda r: text_reply(), forbidden=["Leo Gomez", "Leo"])

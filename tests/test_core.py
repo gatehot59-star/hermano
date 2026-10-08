@@ -274,6 +274,9 @@ class TestLanguages(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop("QLOO_API_KEY", None)
+        # A real GROQ_API_KEY in the shell must not turn the CLI tests into network calls.
+        os.environ.pop("GROQ_API_KEY", None)
+        os.environ.pop("HERMANO_MODELS", None)
 
     def run_main(self, *args):
         buf = io.StringIO()
@@ -285,11 +288,22 @@ class TestLanguages(unittest.TestCase):
         rc, out = self.run_main("demo")
         self.assertEqual(rc, 0)
         self.assertIn("First: ", out)
+        self.assertIn(t("en", "cli.planner.rules"), out)
         self.assertNotIn("Primero: ", out)
         rc, out = self.run_main("demo", "--lang", "es")
         self.assertEqual(rc, 0)
         self.assertIn("Primero: ", out)
         self.assertNotIn("First: ", out)
+
+    def test_planner_flag(self):
+        rc, out = self.run_main("demo", "--planner", "rules")
+        self.assertEqual(rc, 0)
+        self.assertIn(t("en", "cli.planner.rules"), out)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, out = self.run_main("demo", "--planner", "llm")
+        self.assertEqual(rc, 2)
+        self.assertIn("GROQ_API_KEY", err.getvalue())
 
     def test_every_text_exists_in_both_languages(self):
         self.assertEqual(set(TEXT["en"]), set(TEXT["es"]))

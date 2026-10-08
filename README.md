@@ -15,9 +15,10 @@ Hermano works on that gap: the day-to-day follow-up, and the child's own voice.
 1. An adult enters what the child likes: a show, a game, a band, a sports star.
 2. **Qloo is the core.** Hermano looks each interest up with `/search` and asks `/v2/insights` for related books, artists, TV shows, video games and movies. Movies and shows are requested with `filter.content_rating` for the child's age, so Qloo itself keeps them age-appropriate.
 3. **Nothing new reaches the child without an adult's OK.** Qloo's ideas go first to the child's family or teacher. The ones they approve become the child's motivators; the ones they reject are left out of the next Qloo request with `filter.exclude.entities`. Games the team knows are rated above the child's age (ESRB) are never even proposed.
-4. For every block of the school day, Hermano prepares a first/then cue, a warning before each change and calm-down options. Rewards come only after classes, never after recess or at dismissal, and they rotate so they do not wear out.
-5. At the end of the day the child says how each step went, with faces.
-6. Each adult gets a different report, only about the children linked to them: practical notes and new ideas to approve for the teacher, an aggregate for the principal, plain language for the family, a structured log for the specialist.
+4. **The agent plans the day.** A language model (Qwen3.8-27B on Groq) reads the day and the ideas through tools, chooses which adult-approved idea follows each class, and suggests up to two new Qloo ideas for the adults, each with one sentence on why it fits. It only ever sees the placeholder STUDENT_1, the child's age, the blocks and the titles: no name, no supports. Hermano's rules check every choice (no reward after recess, nothing unapproved for the child) and tell the model what to fix. Without the model, the rule-based planner does the same job.
+5. For every block of the school day, Hermano prepares a first/then cue, a warning before each change and calm-down options. Rewards come only after classes, never after recess or at dismissal, and they rotate so they do not wear out.
+6. At the end of the day the child says how each step went, with faces.
+7. Each adult gets a different report, only about the children linked to them: practical notes and new ideas to approve for the teacher, an aggregate for the principal, plain language for the family, a structured log for the specialist.
 
 Without Qloo, every child would get the same generic routine: that is exactly what Hermano falls back to when Qloo does not answer.
 
@@ -34,9 +35,11 @@ Without Qloo, every child would get the same generic routine: that is exactly wh
 
 8 October 2026, first batch after the first audit: the Qloo client follows the hackathon rules (hackathon base URL only, the `/search` type names, 404 read as "no results", retries on 429 and timeouts, private cache), plus the age gate, adult approval, the privacy guard, English and Spanish, and `pip install`.
 
-Second batch, same day: `hermano/llm.py`, the language model client. Model: Qwen3.8-27B on Groq (`qwen/qwen3.8-27b`, a Groq Preview model), falling back to `openai/gpt-oss-20b` and then to the rule-based planner. Every message is checked before it leaves: health words, contact data or a real name stop the request, so the model only sees placeholders such as STUDENT_1. It includes a small tool loop with a step limit. First calls to the real Groq API, same afternoon, with invented data only: both models read the day and queued one idea for an adult to approve, after a class block and with the placeholder only (Qwen 3 of 3 runs; gpt-oss-20b 2 of 3, the third misnamed a tool, which Groq rejects with `tool_use_failed` and Hermano now retries). Groq's edge answers 403 (error 1010) to Python's default user agent, so the Groq and Qloo clients send `hermano/<version>`. One plan with two tool calls used about 2,000 tokens; the free plan allows 8,000 per minute. 75 tests.
+Second batch, same day: `hermano/llm.py`, the language model client. Model: Qwen3.8-27B on Groq (`qwen/qwen3.8-27b`, a Groq Preview model), falling back to `openai/gpt-oss-20b` and then to the rule-based planner. Every message is checked before it leaves: health words, contact data or a real name stop the request, so the model only sees placeholders such as STUDENT_1. It includes a small tool loop with a step limit. First calls to the real Groq API, same afternoon, with invented data only: both models read the day and queued one idea for an adult to approve, after a class block and with the placeholder only (Qwen 3 of 3 runs; gpt-oss-20b 2 of 3, the third misnamed a tool, which Groq rejects with `tool_use_failed` and Hermano now retries). Groq's edge answers 403 (error 1010) to Python's default user agent, so the Groq and Qloo clients send `hermano/<version>`. One plan with two tool calls used about 2,000 tokens; the free plan allows 8,000 per minute.
 
-Not done yet, in this order: wiring the tool loop into the planner (the model proposes, an adult approves, the child's view never calls the model), the web views (the child's view for the phone, the adults' views), the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
+Third batch, same day: the agent planner, `hermano/planner.py`. The model gets three tools (`get_day`, `get_motivators`, `submit_plan`) and the code accepts only rewards after a class or special block and only ideas an adult approved; its suggestions, with their reasons, go to the teacher's and the family's reports, never to the child. If the model is down or writes a health word or contact data, the rule-based plan stands. In the first full demo against the real API (invented school, three children) Qwen planned the day of all three children in 28 seconds, every reward after a class and every suggestion inside the age filter. 90 tests.
+
+Not done yet, in this order: the web views (the child's view for the phone, the adults' views), the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
 
 Known limits: titles without a US content rating (for example, local Argentine shows) are left out by the rating filter. The ESRB ratings for games are typed by the team. An interest that matches a child's name is refused even when it is also a real title. Suggested readings do not match the class topic yet.
 
@@ -50,6 +53,7 @@ python -m hermano demo             # one day: plans, the child view and the repo
 python -m hermano demo --lang es   # the same in Spanish
 python -m hermano demo --days 3    # three days; each family approves one new idea per day (simulated)
 python -m hermano privacy          # everything that was sent to Qloo
+python -m hermano demo --planner rules   # never call the language model, even with a key
 ```
 
 Or install it with `pip install .` and run `hermano demo`.
