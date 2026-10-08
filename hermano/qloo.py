@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
+from . import USER_AGENT
 from .guard import guard_query
 from .models import ENTITY_TYPES
 
@@ -159,7 +160,8 @@ class QlooClient:
         while True:
             self.sent.append(url)
             req = urllib.request.Request(
-                url, headers={"X-Api-Key": self.api_key, "Accept": "application/json"}, method="GET")
+                url, method="GET", headers={"X-Api-Key": self.api_key, "Accept": "application/json",
+                                "User-Agent": USER_AGENT})
             try:
                 with self.opener(req, timeout=self.timeout) as resp:
                     data = json.loads(resp.read().decode("utf-8"))

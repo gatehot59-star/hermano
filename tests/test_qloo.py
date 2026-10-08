@@ -48,6 +48,7 @@ class TestHackathonRules(unittest.TestCase):
         req = rec.requests[0]
         self.assertEqual(req.get_method(), "GET")
         self.assertEqual(req.get_header("X-api-key"), "k-test")
+        self.assertTrue(req.get_header("User-agent", "").startswith("hermano/"))
         self.assertTrue(req.full_url.startswith(HACKATHON + "/v2/insights?"))
         self.assertNotIn("k-test", req.full_url)
         self.assertEqual(rec.params(), {"filter.type": ["urn:entity:book"],

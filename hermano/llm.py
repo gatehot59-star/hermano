@@ -23,6 +23,7 @@ import urllib.error
 import urllib.request
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
+from . import USER_AGENT
 from .guard import UnsafeText, contains_contact, contains_health
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -30,7 +31,17 @@ PRIMARY_MODEL = "qwen/qwen3.8-27b"
 FALLBACK_MODEL = "openai/gpt-oss-20b"
 DEFAULT_MODELS = (PRIMARY_MODEL, FALLBACK_MODEL)
 RETRY_STATUS = (429, 500, 502, 503, 504)
-# Any other 4xx (for example a model Groq retired) moves on to the next model.
+# A 400 with code tool_use_failed is a bad generation, not a bad request: gpt-oss-20b sometimes
+# names a tool "propose_motivator<|channel|>commentary" (measured 2026-10-08), so the same
+# model is asked again. Any other 4xx (for example a model Groq retired) moves on to the next.
+
+
+def _tool_use_failed(error: urllib.error.HTTPError) -> bool:
+    try:
+        body = json.loads(error.read().decode("utf-8") or "{}")
+    except (ValueError, OSError, AttributeError):
+        return False
+    return isinstance(body, dict) and (body.get("error") or {}).get("code") == "tool_use_failed"
 
 
 class LLMUnavailable(Exception):
@@ -91,6 +102,7 @@ class GroqChat:
         req = urllib.request.Request(GROQ_URL, data=data, method="POST", headers={
             "Authorization": "Bearer " + self._key,
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         })
         with self.opener(req, timeout=self.timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -114,7 +126,8 @@ class GroqChat:
                     return out["choices"][0]["message"]
                 except urllib.error.HTTPError as e:
                     errors.append(f"{model}: {e.code}")
-                    if e.code in RETRY_STATUS and attempt < self.retries:
+                    again = e.code in RETRY_STATUS or (e.code == 400 and _tool_use_failed(e))
+                    if again and attempt < self.retries:
                         self.sleep(2.0 * (attempt + 1))
                         continue
                     break  # 4xx or retries spent: next model

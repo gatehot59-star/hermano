@@ -1,7 +1,9 @@
 """Language model client and tool loop, against a fake Groq: no network, no key."""
+import io
 import json
 import socket
 import unittest
+import urllib.error
 
 from hermano import llm
 from hermano.guard import UnsafeText
@@ -49,6 +51,8 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(req.full_url, "https://api.groq.com/openai/v1/chat/completions")
         self.assertEqual(req.get_method(), "POST")
         self.assertEqual(req.get_header("Authorization"), "Bearer " + KEY)
+        # Groq blocks the default Python-urllib user agent with a 403 (error 1010).
+        self.assertTrue(req.get_header("User-agent", "").startswith("hermano/"))
         b = body(req)
         self.assertEqual(b["model"], "qwen/qwen3.8-27b")
         self.assertIn(b["reasoning_format"], ("parsed", "hidden"))
@@ -67,6 +71,18 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(c.chat(MSG)["content"], "fine")
         self.assertEqual([body(r)["model"] for r in self.net.requests], [llm.PRIMARY_MODEL] * 2)
         self.assertEqual(len(self.sleeps), 1)
+
+    def test_bad_tool_generation_is_retried_other_400_is_not(self):
+        # Groq answers 400 tool_use_failed when the model misnames a tool (seen with gpt-oss-20b).
+        bad = urllib.error.HTTPError(llm.GROQ_URL, 400, "bad", {}, io.BytesIO(json.dumps(
+            {"error": {"code": "tool_use_failed", "message": "tool call validation failed"}}).encode()))
+        c = self.make(script(bad, text_reply("fine")), models=(llm.FALLBACK_MODEL,))
+        self.assertEqual(c.chat(MSG)["content"], "fine")
+        self.assertEqual(len(self.net.requests), 2)
+        c = self.make(script(http_error(llm.GROQ_URL, 400), text_reply()), models=(llm.FALLBACK_MODEL,))
+        with self.assertRaises(llm.LLMUnavailable):
+            c.chat(MSG)
+        self.assertEqual(len(self.net.requests), 1)
 
     def test_timeout_is_retried(self):
         c = self.make(script(socket.timeout("slow"), text_reply("fine")))
