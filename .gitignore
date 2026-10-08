@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+# Qloo responses must never be committed (hackathon developer guide)
+cache/

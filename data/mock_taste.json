@@ -1,0 +1,45 @@
+{
+ "_note": "Invented by the Hermano team for the offline demo. NOT Qloo data: real Qloo responses are never stored in this repository.",
+ "bluey": {
+  "book": ["Donde viven los monstruos", "El Principito", "Elmer"],
+  "artist": ["Canticuénticos", "Magdalena Fleitas", "Mariana Baggio"],
+  "tv_show": ["Peppa Pig", "Zamba", "Puffin Rock"],
+  "video_game": ["Animal Crossing", "Toca Life World", "Super Mario Wonder"],
+  "movie": ["Toy Story", "Coco", "Intensamente"]
+ },
+ "minecraft": {
+  "book": ["Diario de Greg", "Wonder", "Las crónicas de Narnia"],
+  "artist": ["C418", "Daft Punk", "Marshmello"],
+  "tv_show": ["Gravity Falls", "Hora de aventura", "Zamba"],
+  "video_game": ["Terraria", "Roblox", "Stardew Valley"],
+  "movie": ["La gran aventura Lego", "Ralph, el demoledor", "Coco"]
+ },
+ "tini": {
+  "book": ["Matilda", "Diario de una princesa", "Wonder"],
+  "artist": ["Emilia", "Lali", "María Becerra"],
+  "tv_show": ["Violetta", "Soy Luna", "Floricienta"],
+  "video_game": ["Just Dance", "Animal Crossing", "Los Sims"],
+  "movie": ["Encanto", "Frozen", "High School Musical"]
+ },
+ "harry potter": {
+  "book": ["Percy Jackson", "Las crónicas de Narnia", "Momo"],
+  "artist": ["John Williams", "Hans Zimmer", "Ludovico Einaudi"],
+  "tv_show": ["Merlín", "Avatar: la leyenda de Aang", "Gravity Falls"],
+  "video_game": ["Zelda: Breath of the Wild", "Minecraft", "Ori and the Blind Forest"],
+  "movie": ["Animales fantásticos", "El viaje de Chihiro", "La historia sin fin"]
+ },
+ "dragon ball": {
+  "book": ["One Piece (manga)", "Naruto (manga)", "Mafalda"],
+  "artist": ["Bizarrap", "Linkin Park", "Duki"],
+  "tv_show": ["Naruto", "One Piece", "Pokémon"],
+  "video_game": ["Dragon Ball FighterZ", "Pokémon Escarlata", "Rocket League"],
+  "movie": ["Spider-Man: un nuevo universo", "Kung Fu Panda", "Dragon Ball Super: Broly"]
+ },
+ "lionel messi": {
+  "book": ["Futbolísimos", "Messi para chicos", "El Diego"],
+  "artist": ["La K'onga", "Abel Pintos", "Los Palmeras"],
+  "tv_show": ["Supercampeones", "Inazuma Eleven", "Ted Lasso"],
+  "video_game": ["EA Sports FC", "Rocket League", "Football Manager"],
+  "movie": ["Kung Fu Panda", "Space Jam", "Gol!"]
+ }
+}
