@@ -39,7 +39,7 @@ Second batch, same day: `hermano/llm.py`, the language model client. Model: Qwen
 
 Third batch, same day: the agent planner, `hermano/planner.py`. The model gets three tools (`get_day`, `get_motivators`, `submit_plan`) and the code accepts only rewards after a class or special block and only ideas an adult approved; its suggestions, with their reasons, go to the teacher's and the family's reports, never to the child. If the model is down or writes a health word or contact data, the rule-based plan stands. In the first full demo against the real API (invented school, three children) Qwen planned the day of all three children in 28 seconds, every reward after a class and every suggestion inside the age filter. 90 tests.
 
-Fourth batch, same day: the web views, `hermano/web.py` (`python -m hermano serve`). The child's view is made for the phone: the day step by step, a heads-up before each change, calm-down options, and three faces to say how each step went. It shows only titles an adult approved, never Hermano's suggestions or their reasons. Each adult gets a page with their report; the family and the teacher also get the new ideas, with the agent's reason, and Yes and No buttons. No request calls the language model or Qloo: the day's plans are built once per day and language (the rule-based plan at once, the agent's plan in the background) and kept in a private cache, so visitors do not spend the free quota. Every visitor gets their own copy of the approvals and the check-ins, so judges do not change each other's demo. The pages carry no scripts. 117 tests.
+Fourth batch, same day: the web views, `hermano/web.py` (`python -m hermano serve`). The child's view is made for the phone: the day step by step, a heads-up before each change, calm-down options, and three faces to say how each step went. It shows only titles an adult approved, never Hermano's suggestions or their reasons. Each adult gets a page with their report; the family and the teacher also get the new ideas, with the agent's reason, and Yes and No buttons. No request calls the language model or Qloo: the day's plans are built once per day and language (the rule-based plan at once, the agent's plan in the background) and kept in a private cache, so visitors do not spend the free quota. Every visitor gets their own copy of the approvals and the check-ins, so judges do not change each other's demo. The pages carry no scripts. 119 tests.
 
 Not done yet, in this order: the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
 
@@ -66,6 +66,10 @@ With a hackathon key, `export QLOO_API_KEY=...` and the same commands call `http
 With a Groq key, `export GROQ_API_KEY=...` turns the language model on; `HERMANO_MODELS` (comma separated) changes the model order. Without it, Hermano uses its rule-based planner.
 
 On a host, run `python -m hermano serve --host 0.0.0.0` (or set `HOST` and `PORT`), and set `HERMANO_HTTPS=1` behind HTTPS. The day's plans are cached in `cache/plans` (git-ignored; `HERMANO_PLAN_DIR` changes it), so a day costs at most one agent plan per child and language, however many people open the demo. `/healthz` reports which plan is being served.
+
+## Public demo on Render
+
+`render.yaml` is a Render Blueprint for one free web service: `pip install .`, then `python -m hermano serve --host 0.0.0.0` on the port Render gives, a health check on `/healthz`, and Python 3.12 (`.python-version`). Render asks for `GROQ_API_KEY` when the Blueprint is created; the value never goes into the repository. A free service sleeps after 15 minutes without visitors and takes about a minute to wake up, and its disk is not kept. So after waking up Hermano serves the rule-based plan at once, plans with the agent in the background, and the home page reloads itself every 20 seconds until the agent is done.
 
 ## Credits
 

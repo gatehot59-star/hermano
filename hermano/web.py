@@ -42,6 +42,7 @@ SESSION_TTL = 6 * 3600
 MAX_SESSIONS = 2000
 MAX_BODY = 4096
 MAX_IDEAS_SHOWN = 3
+REFRESH_WHILE_PLANNING = 20  # seconds
 CSP = ("default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; "
        "frame-ancestors 'none'")
 Response = Tuple[int, List[Tuple[str, str]], bytes]
@@ -386,14 +387,15 @@ class App:
 
     # ---- pages ----
 
-    def _page(self, lang: str, title: str, body: str, path: str) -> bytes:
+    def _page(self, lang: str, title: str, body: str, path: str, refresh: int = 0) -> bytes:
         other = "es" if lang == "en" else "en"
+        again = f"<meta http-equiv='refresh' content='{int(refresh)}'>" if refresh else ""
         reset = (f"<form method='post' action='/reset'><input type='hidden' name='lang' value='{lang}'>"
                  f"<button class='no' type='submit'>{esc(t(lang, 'web.reset'))}</button></form>")
         return ("<!doctype html>"
                 f"<html lang='{lang}'><head><meta charset='utf-8'>"
                 "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-                f"<title>{esc(title)}</title><style>{CSS}</style></head><body>"
+                f"{again}<title>{esc(title)}</title><style>{CSS}</style></head><body>"
                 f"<header><a class='brand' href='/?lang={lang}'>Hermano</a>"
                 f"<span class='badge'>{esc(t(lang, 'web.invented_short'))}</span>"
                 f"<a class='lang' href='{esc(path)}?lang={other}'>{esc(t(lang, 'web.other_lang'))}</a>"
@@ -402,8 +404,10 @@ class App:
                 f"<a href='/privacy?lang={lang}'>{esc(t(lang, 'web.privacy_link'))}</a></p>"
                 f"<p>{esc(t(lang, 'web.invented'))}</p>{reset}</footer></body></html>").encode("utf-8")
 
-    def _html(self, status: int, lang: str, title: str, body: str, path: str) -> Response:
-        return status, [("Content-Type", "text/html; charset=utf-8")], self._page(lang, title, body, path)
+    def _html(self, status: int, lang: str, title: str, body: str, path: str,
+              refresh: int = 0) -> Response:
+        return (status, [("Content-Type", "text/html; charset=utf-8")],
+                self._page(lang, title, body, path, refresh))
 
     def _message(self, status: int, lang: str, key: str, path: str) -> Response:
         return self._html(status, lang, "Hermano", f"<p>{esc(t(lang, key))}</p>", path)
@@ -417,9 +421,12 @@ class App:
         msg, session.flash = session.flash, ""
         return f"<p class='flash' role='status'>{esc(msg)}</p>" if msg else ""
 
+    def _building(self, day: dict) -> bool:
+        return day["planner"] == "rules" and self.has_llm and (day["date"], day["lang"]) not in self.failed
+
     def _planner_line(self, day: dict, lang: str) -> str:
         plans = [r["plan"] for r in day["records"].values()]
-        if day["planner"] == "rules" and self.has_llm and (day["date"], day["lang"]) not in self.failed:
+        if self._building(day):
             return t(lang, "web.building")
         if plans and all(p.get("planner") == "llm" for p in plans):
             return t(lang, "cli.planner.llm", model=plans[0].get("model", ""))
@@ -444,7 +451,9 @@ class App:
                     parts.append(f"<li class='card'><a href='/adult/{esc(aid)}?lang={lang}'>"
                                  f"{esc(pick(a.name, lang))}</a> \u00b7 {esc(t(lang, 'web.role.' + role))}</li>")
         parts.append(f"</ul><p class='note'>{esc(t(lang, 'web.demo_login'))}</p>")
-        return self._html(200, lang, "Hermano", "".join(parts), "/")
+        # After a cold start the agent needs a minute or two: the home page reloads itself.
+        return self._html(200, lang, "Hermano", "".join(parts), "/",
+                          REFRESH_WHILE_PLANNING if self._building(day) else 0)
 
     def _child(self, lang: str, session: Session, sid: str) -> Response:
         """The child's own view. Only titles an adult approved; no suggestions, no reasons."""

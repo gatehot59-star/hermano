@@ -1,0 +1,18 @@
+# Render Blueprint for the public demo (free web service).
+# Secrets are never written here: Render asks for GROQ_API_KEY when the Blueprint is created.
+# Without it the demo still runs, with the rule-based planner.
+services:
+  - type: web
+    name: hermano
+    runtime: python
+    plan: free
+    region: virginia
+    branch: main
+    buildCommand: pip install .
+    startCommand: python -m hermano serve --host 0.0.0.0
+    healthCheckPath: /healthz
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: HERMANO_HTTPS
+        value: "1"

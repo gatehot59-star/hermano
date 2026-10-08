@@ -200,12 +200,14 @@ class TestPlansAreCached(WebCase):
                        background=True)
         _, _, body = Browser(app).get("/")
         self.assertIn(esc(t("en", "web.building")), body)
+        self.assertIn("http-equiv='refresh' content='20'", body)
         gate.set()
         for _ in range(100):
             if app.plans("en")["planner"] == "llm":
                 break
             time.sleep(0.05)
         self.assertEqual(app.plans("en")["planner"], "llm")
+        self.assertNotIn("http-equiv='refresh'", Browser(app).get("/")[2])
 
     def test_another_language_is_not_kept_waiting_by_the_agent(self):
         # Found against the real API: the first Spanish visitor waited for the English agent plan.
@@ -437,3 +439,29 @@ class TestCli(WebCase):
         self.assertNotEqual(rules.tag, agent.tag)
         forced = make_app(DATA, planner="rules", cache_dir=self.cache)
         self.assertEqual([n for n, _ in forced.planners], ["rules"])
+
+
+class TestDeploy(unittest.TestCase):
+    """The Render Blueprint: free plan, the real start command, no secret values."""
+
+    def test_blueprint(self):
+        from tests.helpers import ROOT
+        text = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        self.assertIn("plan: free", text)
+        self.assertIn("startCommand: python -m hermano serve --host 0.0.0.0", text)
+        self.assertIn("healthCheckPath: /healthz", text)
+        key = text.index("key: GROQ_API_KEY")
+        self.assertTrue(text[key:].split("\n")[1].strip() == "sync: false")
+        self.assertNotRegex(text, r"gsk_[A-Za-z0-9]|QLOO_API_KEY\s*\n\s*value")
+        self.assertEqual((ROOT / ".python-version").read_text(encoding="utf-8").strip(), "3.12")
+
+    def test_the_start_command_parses(self):
+        import argparse
+        from hermano import __main__ as cli
+        seen = {}
+        with mock.patch.dict(os.environ, {"PORT": "10000"}), \
+                mock.patch("hermano.web.serve", lambda app, host, port: seen.update(host=host, port=port)), \
+                mock.patch("hermano.web.make_app", lambda data, planner: mock.Mock(has_llm=False)):
+            rc = cli.main(["serve", "--host", "0.0.0.0"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, {"host": "0.0.0.0", "port": 10000})
