@@ -3,6 +3,7 @@
     hermano demo [--days N] [--lang en|es] [--planner auto|rules|llm]
                                              plans, child view and the report for every adult
     hermano privacy [--days N]               everything that was sent to Qloo
+    hermano serve [--host H] [--port P]      the web views: the child's phone view and each adult's
 
 With more than one day, the demo simulates each family approving one new idea per day.
 With GROQ_API_KEY set, --planner auto (the default) lets the language model plan, checked by
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import os
 import sys
 from pathlib import Path
 
@@ -28,7 +30,7 @@ DATA = Path(__file__).resolve().parent / "data"
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="hermano")
-    ap.add_argument("cmd", choices=["demo", "privacy"])
+    ap.add_argument("cmd", choices=["demo", "privacy", "serve"])
     ap.add_argument("--days", type=int, default=1)
     ap.add_argument("--lang", choices=LANGS, default=DEFAULT_LANG)
     ap.add_argument("--data", default=str(DATA))
@@ -36,8 +38,18 @@ def main(argv=None) -> int:
                     help="do not simulate families approving new ideas between days")
     ap.add_argument("--planner", choices=["auto", "rules", "llm"], default="auto",
                     help="auto: the language model if GROQ_API_KEY is set, rules otherwise")
+    ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     a = ap.parse_args(argv)
     lang = a.lang
+    if a.cmd == "serve":
+        from . import web
+        app = web.make_app(a.data, planner=a.planner)
+        if a.planner == "llm" and not app.has_llm:
+            print("--planner llm needs GROQ_API_KEY", file=sys.stderr)
+            return 2
+        web.serve(app, a.host, a.port)
+        return 0
     school = load_school(Path(a.data) / "demo_school.json")
     approvals = Approvals.load(Path(a.data) / "demo_approvals.json")
     qloo = make_client(a.data)

@@ -39,7 +39,9 @@ Second batch, same day: `hermano/llm.py`, the language model client. Model: Qwen
 
 Third batch, same day: the agent planner, `hermano/planner.py`. The model gets three tools (`get_day`, `get_motivators`, `submit_plan`) and the code accepts only rewards after a class or special block and only ideas an adult approved; its suggestions, with their reasons, go to the teacher's and the family's reports, never to the child. If the model is down or writes a health word or contact data, the rule-based plan stands. In the first full demo against the real API (invented school, three children) Qwen planned the day of all three children in 28 seconds, every reward after a class and every suggestion inside the age filter. 90 tests.
 
-Not done yet, in this order: the web views (the child's view for the phone, the adults' views), the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
+Fourth batch, same day: the web views, `hermano/web.py` (`python -m hermano serve`). The child's view is made for the phone: the day step by step, a heads-up before each change, calm-down options, and three faces to say how each step went. It shows only titles an adult approved, never Hermano's suggestions or their reasons. Each adult gets a page with their report; the family and the teacher also get the new ideas, with the agent's reason, and Yes and No buttons. No request calls the language model or Qloo: the day's plans are built once per day and language (the rule-based plan at once, the agent's plan in the background) and kept in a private cache, so visitors do not spend the free quota. Every visitor gets their own copy of the approvals and the check-ins, so judges do not change each other's demo. The pages carry no scripts. 117 tests.
+
+Not done yet, in this order: the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
 
 Known limits: titles without a US content rating (for example, local Argentine shows) are left out by the rating filter. The ESRB ratings for games are typed by the team. An interest that matches a child's name is refused even when it is also a real title. Suggested readings do not match the class topic yet.
 
@@ -54,6 +56,7 @@ python -m hermano demo --lang es   # the same in Spanish
 python -m hermano demo --days 3    # three days; each family approves one new idea per day (simulated)
 python -m hermano privacy          # everything that was sent to Qloo
 python -m hermano demo --planner rules   # never call the language model, even with a key
+python -m hermano serve           # the web views on http://127.0.0.1:8000/
 ```
 
 Or install it with `pip install .` and run `hermano demo`.
@@ -61,6 +64,8 @@ Or install it with `pip install .` and run `hermano demo`.
 With a hackathon key, `export QLOO_API_KEY=...` and the same commands call `https://hackathon.api.qloo.com`. Never commit the key.
 
 With a Groq key, `export GROQ_API_KEY=...` turns the language model on; `HERMANO_MODELS` (comma separated) changes the model order. Without it, Hermano uses its rule-based planner.
+
+On a host, run `python -m hermano serve --host 0.0.0.0` (or set `HOST` and `PORT`), and set `HERMANO_HTTPS=1` behind HTTPS. The day's plans are cached in `cache/plans` (git-ignored; `HERMANO_PLAN_DIR` changes it), so a day costs at most one agent plan per child and language, however many people open the demo. `/healthz` reports which plan is being served.
 
 ## Credits
 
