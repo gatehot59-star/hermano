@@ -83,6 +83,22 @@ def _type_matches(entity: dict, kind: str) -> bool:
     return any(d in (search_urn(kind), "urn:entity:" + kind) for d in known)
 
 
+def _rating(entity: dict) -> str:
+    """properties.content_rating (MPAA, TV or ESRB), or '' when Qloo has none."""
+    value = (entity.get("properties") or {}).get("content_rating") or ""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _tags(entity: dict) -> List[str]:
+    """Tag names, used only for the age gate and kept in memory."""
+    return [t["name"] for t in entity.get("tags") or [] if isinstance(t, dict) and t.get("name")]
+
+
+def _idea(entity: dict, kind: str) -> dict:
+    return {"name": entity["name"], "kind": kind, "id": entity.get("entity_id") or entity.get("id") or "",
+            "rating": _rating(entity), "tags": _tags(entity)}
+
+
 class ResponseCache:
     """Private server-side cache of Qloo answers, which the developer guide allows. Keyed by a
     hash of the request; the API key is never part of the key or of the file."""
@@ -192,6 +208,11 @@ class QlooClient:
 
     def search(self, name: str, kind: str) -> Optional[str]:
         """Qloo entity id for an interest name, or None."""
+        found = self.search_entity(name, kind)
+        return found["id"] if found else None
+
+    def search_entity(self, name: str, kind: str) -> Optional[dict]:
+        """The first match for an interest name, with its id, rating and tags, or None."""
         data = self._get("/search", {"query": name, "types": search_urn(kind), "take": "3"})
         results = data.get("results") or []
         if isinstance(results, dict):
@@ -201,12 +222,13 @@ class QlooClient:
                 continue
             eid = r.get("entity_id") or r.get("id")
             if eid:
-                return eid
+                return {"id": eid, "rating": _rating(r), "tags": _tags(r)}
         return None
 
     def insights(self, kind: str, entity_ids: Sequence[str], take: int = 5,
                  content_ratings: Sequence[str] = (), exclude_ids: Sequence[str] = ()) -> List[dict]:
-        """Related entities of type `kind` for the given interest ids."""
+        """Related entities of type `kind` for the given interest ids, each with its Qloo
+        content rating and tag names for the age gate."""
         params = {"filter.type": urn(kind), "signal.interests.entities": ",".join(entity_ids),
                   "take": str(take)}
         if content_ratings and kind in RATED_KINDS:
@@ -216,17 +238,13 @@ class QlooClient:
         data = self._get("/v2/insights", params)
         results = data.get("results") or {}
         ents = results.get("entities") if isinstance(results, dict) else results
-        out = []
-        for e in ents or []:
-            if e.get("name"):
-                out.append({"name": e["name"], "kind": kind,
-                            "id": e.get("entity_id") or e.get("id") or ""})
-        return out
+        return [_idea(e, kind) for e in ents or [] if e.get("name")]
 
 
 class MockQloo:
-    """Synthetic stand-in used until the API key arrives. It imitates the content-rating
-    filter and the exclusions with ratings the team typed in mock_taste.json."""
+    """Synthetic stand-in for tests and for a demo without a key. It imitates the content-rating
+    filter, the exclusions, the ratings and the tags with values the team typed in
+    mock_taste.json."""
 
     mode = "mock"
 
@@ -234,15 +252,23 @@ class MockQloo:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         ratings = raw.get("_content_ratings", {})
         self.ratings = {k.casefold(): v for k, v in ratings.items() if not k.startswith("_")}
+        tags = raw.get("_tags", {})
+        self.tags = {k.casefold(): list(v) for k, v in tags.items() if not k.startswith("_")}
         self.table = {k: v for k, v in raw.items() if not k.startswith("_")}
         self.sent: List[str] = []
 
     def search(self, name: str, kind: str) -> Optional[str]:
+        found = self.search_entity(name, kind)
+        return found["id"] if found else None
+
+    def search_entity(self, name: str, kind: str) -> Optional[dict]:
         search_urn(kind)
         guard_query(name)
         self.sent.append(f"search {kind}: {name}")
         key = name.casefold()
-        return "mock:" + key if key in self.table else None
+        if key not in self.table:
+            return None
+        return {"id": "mock:" + key, "rating": self.ratings.get(key, ""), "tags": self.tags.get(key, [])}
 
     def insights(self, kind: str, entity_ids: Sequence[str], take: int = 5,
                  content_ratings: Sequence[str] = (), exclude_ids: Sequence[str] = ()) -> List[dict]:
@@ -263,7 +289,9 @@ class MockQloo:
                 if rated and self.ratings.get(item.casefold()) not in content_ratings:
                     continue
                 names.append(item)
-        return [{"name": n, "kind": kind, "id": "mock:" + n.casefold()} for n in names[:take]]
+        return [{"name": n, "kind": kind, "id": "mock:" + n.casefold(),
+                 "rating": self.ratings.get(n.casefold(), ""), "tags": self.tags.get(n.casefold(), [])}
+                for n in names[:take]]
 
 
 def make_client(data_dir, cache_dir=None):

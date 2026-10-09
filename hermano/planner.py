@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional
 
-from .agent import WORK_KINDS, Candidate, Rotation, TasteProfile, _approved, _show, plan_day
+from .agent import WORK_KINDS, Candidate, Rotation, TasteProfile, _show, motivators, plan_day
 from .approvals import PENDING, Approvals
 from .guard import Pseudonymizer, UnsafeText, contains_contact, contains_health
 from .i18n import DEFAULT_LANG, LANGS, pick, t
@@ -62,7 +62,7 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
 
     pseudo = Pseudonymizer([student.alias])
     ideas = profile.pool()
-    approved = [c for c in ideas if _approved(approvals, student.id, c)]
+    approved = motivators(student, profile, approvals)
     candidates = [c for c in ideas if approvals.status(student.id, c.domain, c.name) == PENDING]
     m_ids = {f"M{i}": c for i, c in enumerate(approved, 1)}
     c_ids = {f"C{i}": c for i, c in enumerate(candidates[:MAX_CANDIDATES], 1)}

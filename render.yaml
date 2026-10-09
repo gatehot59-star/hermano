@@ -1,6 +1,7 @@
 # Render Blueprint for the public demo (free web service).
-# Secrets are never written here: Render asks for GROQ_API_KEY when the Blueprint is created.
-# Without it the demo still runs, with the rule-based planner.
+# Secrets are never written here: Render asks for GROQ_API_KEY and QLOO_API_KEY when the
+# Blueprint is created. Without them the demo still runs, with the rule-based planner and the
+# team's invented mock instead of Qloo.
 services:
   - type: web
     name: hermano
@@ -13,6 +14,8 @@ services:
     healthCheckPath: /healthz
     envVars:
       - key: GROQ_API_KEY
+        sync: false
+      - key: QLOO_API_KEY
         sync: false
       - key: HERMANO_HTTPS
         value: "1"

@@ -1,5 +1,6 @@
 {
  "_note": "Invented by the Hermano team for the offline demo. NOT Qloo data: real Qloo responses are never stored in this repository. The titles are real works; the links between them were invented by the team.",
+ "_tags": {"_note": "Typed by the team so the mock can imitate Qloo's tags for the age gate (Childrens, Middle Grade, Family-Oriented and so on); they may be wrong. Not Qloo data.", "where the wild things are": ["Childrens", "Picture Books"], "the little prince": ["Childrens", "Classics"], "elmer": ["Childrens", "Picture Books"], "diary of a wimpy kid": ["Middle Grade", "Humor"], "wonder": ["Middle Grade", "Realistic Fiction"], "the chronicles of narnia": ["Childrens", "Fantasy"], "matilda": ["Childrens", "Classics"], "the princess diaries": ["Young Adult", "Middle Grade"], "percy jackson": ["Middle Grade", "Mythology"], "momo": ["Childrens", "Fantasy"], "canticuénticos": ["Family-Oriented", "Childrens"], "magdalena fleitas": ["Family-Oriented", "Folk"], "mariana baggio": ["Family-Oriented"]},
  "_content_ratings": {
   "_note": "Typed by the team so the mock can imitate Qloo's filter.content_rating; they may be wrong. The real app never reads this table: Qloo filters on its side.",
   "toy story": "G", "coco": "PG", "inside out": "PG", "the lego movie": "PG", "wreck-it ralph": "PG",
