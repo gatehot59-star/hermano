@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import unittest
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -250,7 +251,7 @@ class TestSafety(Base):
         self.assertEqual(by_type["urn:entity:movie"]["filter.content_rating"],
                          ["G,TV-Y,TV-G,PG,TV-Y7,TV-Y7-FV,TV-PG"])
         self.assertNotIn("PG-13", by_type["urn:entity:tv_show"]["filter.content_rating"][0].split(","))
-        self.assertNotIn("filter.content_rating", by_type["urn:entity:video_game"])
+        self.assertNotIn("filter.content_rating", by_type["urn:entity:videogame"])
         mati = build_profile(self.school.students["s3"], self.qloo, self.school.roster(), self.approvals)  # 14
         shows = {c.name for c in mati.pool() if c.domain == "tv_show"}
         self.assertNotIn("Ted Lasso", shows)  # TV-MA in the mock
@@ -258,6 +259,27 @@ class TestSafety(Base):
 
 
 class TestRobustness(Base):
+    def test_a_type_qloo_refuses_is_skipped_not_the_whole_day(self):
+        # Seen live 2026-10-08: one refused type (400) used to empty the whole profile.
+        def reply_with(code):
+            def reply(req):
+                url = req.full_url
+                if "/search" in url:
+                    return {"results": [{"name": "x", "entity_id": "E-x"}]}
+                kind = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["filter.type"][0].rsplit(":", 1)[1]
+                if kind == "book":
+                    return http_error(url, code)
+                return {"results": {"entities": [{"name": "Idea " + kind, "entity_id": "E-" + kind}]}}
+            return reply
+        leo = self.school.students["s1"]
+        prof = build_profile(leo, real_client(Recorder(reply_with(400))), self.school.roster(), self.approvals)
+        self.assertFalse(prof.degraded)
+        self.assertEqual(prof.by_domain["book"], [])
+        for d in ("artist", "tv_show", "movie"):
+            self.assertEqual([c.name for c in prof.by_domain[d]], ["Idea " + d])
+        bad_key = build_profile(leo, real_client(Recorder(reply_with(401))), self.school.roster(), self.approvals)
+        self.assertEqual(bad_key.degraded, "Qloo 401")
+
     def test_qloo_down_means_a_generic_plan_not_a_crash(self):
         rec = Recorder(lambda r: http_error(r.full_url, 429))
         records, profiles = run_day(self.school, real_client(rec), Rotation(), self.approvals)

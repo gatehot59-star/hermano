@@ -26,8 +26,9 @@ from .models import ENTITY_TYPES
 
 HACKATHON_BASE_URL = "https://hackathon.api.qloo.com"
 BASE_URL = HACKATHON_BASE_URL
-# /search names some types differently from /v2/insights (developer guide; /search OpenAPI
-# reference read 2026-10-08): video games are urn:entity:videogame there.
+# Type names for /search and /v2/insights. Video games are urn:entity:videogame in both:
+# measured against the hackathon API on 2026-10-08, filter.type=urn:entity:video_game answers
+# 400 ("not supported for filter.type") and urn:entity:videogame answers 200.
 SEARCH_TYPES = {
     "artist": "urn:entity:artist", "book": "urn:entity:book", "brand": "urn:entity:brand",
     "movie": "urn:entity:movie", "person": "urn:entity:person", "place": "urn:entity:place",
@@ -57,7 +58,7 @@ def urn(kind: str) -> str:
     """Insights filter.type URN, e.g. urn:entity:book."""
     if kind not in ENTITY_TYPES:
         raise ValueError(f"unsupported Qloo entity type: {kind}")
-    return "urn:entity:" + kind
+    return SEARCH_TYPES.get(kind, "urn:entity:" + kind)
 
 
 def search_urn(kind: str) -> str:

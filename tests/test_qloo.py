@@ -25,7 +25,7 @@ class TestTypes(unittest.TestCase):
 
     def test_search_uses_its_own_type_names(self):
         self.assertEqual(search_urn("video_game"), "urn:entity:videogame")
-        self.assertEqual(urn("video_game"), "urn:entity:video_game")
+        self.assertEqual(urn("video_game"), "urn:entity:videogame")  # video_game: 400 live, 2026-10-08
         self.assertEqual(search_urn("tv_show"), "urn:entity:tv_show")
         with self.assertRaises(ValueError):
             search_urn("destination")
@@ -70,6 +70,7 @@ class TestHackathonRules(unittest.TestCase):
         self.assertEqual(rec.params()["filter.content_rating"], ["TV-Y"])
         c.insights("video_game", ["A"], content_ratings=("G",))
         self.assertNotIn("filter.content_rating", rec.params())
+        self.assertEqual(rec.params()["filter.type"], ["urn:entity:videogame"])
 
     def test_rejected_entities_are_excluded(self):
         rec = Recorder()

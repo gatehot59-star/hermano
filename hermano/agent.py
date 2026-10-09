@@ -68,7 +68,8 @@ def build_profile(student: Student, qloo, roster=(), approvals: Optional[Approva
     """Expand the child's interests across domains with Qloo, for the child's age.
 
     Only safe interest names and Qloo entity ids are sent: never the child's alias, id or
-    supports. If Qloo does not answer, the profile is empty and the day uses generic rewards.
+    supports. If Qloo does not answer, the profile is empty and the day uses generic rewards;
+    if Qloo refuses one type (400), only that type is skipped.
     """
     ratings = load_game_ratings() if game_ratings is None else game_ratings
     roster = list(roster) or [student.alias]
@@ -95,6 +96,10 @@ def build_profile(student: Student, qloo, roster=(), approvals: Optional[Approva
                 items = qloo.insights(d, ids, take=take, content_ratings=allowed, exclude_ids=exclude)
             except UnsupportedType:
                 continue
+            except QlooError as e:
+                if e.status != 400:
+                    raise
+                continue  # Qloo refused this one type (seen live 2026-10-08): keep the others
             for x in items:
                 if x["name"].casefold() in own:
                     continue
