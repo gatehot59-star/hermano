@@ -21,7 +21,7 @@ from .agent import Rotation, report_for, run_day, simulate_family_approvals
 from .approvals import Approvals
 from .i18n import DEFAULT_LANG, LANGS, pick, t
 from .llm import make_llm
-from .models import load_school
+from .models import exercise_text, load_school
 from .planner import forbidden_names, llm_plan_day
 from .qloo import make_client
 
@@ -84,6 +84,8 @@ def main(argv=None) -> int:
                         print(f"         {t(lang, 'cli.warning')}: {s.warning}")
                     if s.movement:
                         print(f"         {s.movement}")
+                    if s.exercise:
+                        print(f"         {t(lang, 'exercise.child', x=exercise_text(s.exercise, lang))}")
             for adult in school.adults.values():
                 print("\n" + "-" * 64)
                 print(report_for(adult, school, records, lang))

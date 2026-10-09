@@ -19,6 +19,7 @@ import secrets
 import threading
 import time
 from collections import OrderedDict
+from dataclasses import replace
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,7 +32,7 @@ from .agent import (FACE_ICON, FACES, Candidate, CheckIn, Rotation, Step, _show,
 from .approvals import PENDING, Approvals
 from .i18n import DEFAULT_LANG, LANGS, pick, t
 from .llm import make_llm
-from .models import APPROVER_ROLES, ROLES, School, load_school
+from .models import APPROVER_ROLES, ROLES, School, exercise_text, load_school
 from .planner import forbidden_names, llm_plan_day
 from .qloo import make_client
 
@@ -70,6 +71,9 @@ main{max-width:46rem;margin:0 auto;padding:1rem}
 .yes{background:var(--accent);color:#fff;border:0;border-radius:.5rem;padding:.4rem 1rem;font-size:1rem}
 .no{background:#fff;border:1px solid #b8b2a7;border-radius:.5rem;padding:.4rem 1rem;font-size:1rem}
 .report p{margin:.25rem 0}
+.ex{background:#eef3fb;border-radius:.75rem;padding:.5rem .75rem;margin:.5rem 0}
+.did button{font-size:1rem;border:2px solid #d9d4c7;background:#fff;border-radius:.75rem;padding:.25rem .6rem;margin:.2rem .3rem .2rem 0}
+.did button.picked{border-color:var(--accent);background:#e6f2ee}
 ul.plain{list-style:none;padding:0}
 footer{max-width:46rem;margin:2rem auto;padding:0 1rem;color:var(--muted);font-size:.9rem}
 """
@@ -108,7 +112,7 @@ def dump_records(records: Dict) -> Dict:
             "steps": [{"activity": s.activity, "first_then": s.first_then, "warning": s.warning,
                        "calm": list(s.calm), "reward_domain": s.reward_domain,
                        "reward_item": s.reward_item, "reward": s.reward, "reading": s.reading,
-                       "movement": s.movement, "reinforce": s.reinforce}
+                       "exercise": s.exercise, "movement": s.movement, "reinforce": s.reinforce}
                       for s in p["steps"]],
             "pending": [_cand(c) for c in p["pending"]],
             "suggested": [{"candidate": _cand(x["candidate"]), "reason": x["reason"]}
@@ -127,7 +131,7 @@ def load_records(school: School, data: Dict, lang: str) -> Dict:
             raise ValueError("cached plan does not match the schedule")
         steps = [Step(b, s["activity"], s["first_then"], s["warning"], list(s["calm"]),
                       s["reward_domain"], s["reward_item"], s["reward"], s["reading"],
-                      s.get("movement", ""), s.get("reinforce", ""))
+                      s.get("movement", ""), s.get("reinforce", ""), s.get("exercise", ""))
                  for b, s in zip(blocks, d["steps"])]
         plan = {"student": school.students[sid], "lang": lang, "greeting": d["greeting"],
                 "steps": steps, "pending": [_uncand(c) for c in d["pending"]],
@@ -150,6 +154,7 @@ class Session:
     def reset(self, approvals_raw: dict) -> None:
         self.approvals = Approvals(json.loads(json.dumps(approvals_raw)))
         self.faces: Dict[str, Dict[int, str]] = {}
+        self.did: Dict[str, Dict[int, bool]] = {}  # the child's own answer about each exercise
         self.flash = ""
 
 
@@ -329,8 +334,10 @@ class App:
             plan["suggested"] = [x for x in plan.get("suggested", []) if waiting(x["candidate"])]
             told = session.faces.get(sid, {})
             invented = demo_checkins(self.school.students[sid], rec["plan"], 0)
-            checkins = [CheckIn(c.activity, told[i]) if i in told else c
+            checkins = [CheckIn(c.activity, told[i], exercise_done=c.exercise_done) if i in told else c
                         for i, c in enumerate(invented)]
+            did = session.did.get(sid, {})
+            checkins = [replace(c, exercise_done=did[i]) if i in did else c for i, c in enumerate(checkins)]
             out[sid] = {"plan": plan, "checkins": checkins, "told": len(told)}
         return out
 
@@ -461,6 +468,7 @@ class App:
         """The child's own view. Only titles an adult approved; no suggestions, no reasons."""
         plan = self.plans(lang)["records"][sid]["plan"]
         told = session.faces.get(sid, {})
+        did = session.did.get(sid, {})
         parts = [self._flash(session), f"<h1 class='hello'>{esc(plan['greeting'])}</h1>",
                  f"<p class='note'>{esc(t(lang, 'web.only_approved'))}</p>"]
         for i, s in enumerate(plan["steps"]):
@@ -473,9 +481,19 @@ class App:
                     if s.warning else "")
             calm = "".join(f"<li>{esc(c)}</li>" for c in s.calm)
             move = f"<p class='move'>\U0001F57A {esc(s.movement)}</p>" if s.movement else ""
+            ex = ""
+            if s.exercise:
+                picks = "".join(
+                    f"<button type='submit' name='did' value='{v}' class='{'picked' if did.get(i) is (v == 'yes') else ''}' "
+                    f"aria-pressed='{'true' if did.get(i) is (v == 'yes') else 'false'}'>{esc(t(lang, 'web.did_' + v))}</button>"
+                    for v in ("yes", "no"))
+                ex = (f"<div class='ex'><p>\U0001F9E9 {esc(t(lang, 'exercise.child', x=exercise_text(s.exercise, lang)))}</p>"
+                      f"<form class='did' method='post' action='/child/{esc(sid)}/checkin'>"
+                      f"<input type='hidden' name='lang' value='{lang}'><input type='hidden' name='step' value='{i}'>"
+                      f"<span>{esc(t(lang, 'web.did'))}</span> {picks}</form></div>")
             parts.append(
                 f"<section class='step kind-{esc(b.kind)}' id='s{i}'><p class='time'>{esc(b.start)}-{esc(b.end)}</p>"
-                f"<p class='ft'>{esc(s.first_then)}</p>{warn}{move}"
+                f"<p class='ft'>{esc(s.first_then)}</p>{warn}{move}{ex}"
                 f"<details><summary>{esc(t(lang, 'web.calm'))}</summary><ul>{calm}</ul></details>"
                 f"<form class='faces' method='post' action='/child/{esc(sid)}/checkin'>"
                 f"<input type='hidden' name='lang' value='{lang}'><input type='hidden' name='step' value='{i}'>"
@@ -485,11 +503,19 @@ class App:
 
     def _checkin(self, lang: str, session: Session, sid: str, form) -> Response:
         steps = self.plans(lang)["records"][sid]["plan"]["steps"]
-        raw, face = _one(form, "step"), _one(form, "face")
-        if not (raw.isascii() and raw.isdigit() and len(raw) < 4) or int(raw) >= len(steps) \
-                or face not in FACES:
+        raw, face, did = _one(form, "step"), _one(form, "face"), _one(form, "did")
+        if not (raw.isascii() and raw.isdigit() and len(raw) < 4) or int(raw) >= len(steps):
             return self._message(400, lang, "web.bad_request", f"/child/{sid}")
         i = int(raw)
+        if did:  # the child's answer about the exercise of this step
+            if did not in ("yes", "no") or not steps[i].exercise:
+                return self._message(400, lang, "web.bad_request", f"/child/{sid}")
+            with self.lock:
+                session.did.setdefault(sid, {})[i] = did == "yes"
+                session.flash = t(lang, "web.saved", face=t(lang, "web.did_" + did))
+            return self._redirect(f"/child/{sid}?lang={lang}#s{i}")
+        if face not in FACES:
+            return self._message(400, lang, "web.bad_request", f"/child/{sid}")
         with self.lock:
             session.faces.setdefault(sid, {})[i] = face
             session.flash = t(lang, "web.saved", face=f"{FACE_ICON[face]} {t(lang, 'face.' + face)}")

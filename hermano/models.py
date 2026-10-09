@@ -6,7 +6,7 @@ never a free-text note. The public demo uses invented students only.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
@@ -60,11 +60,48 @@ SUPPORT_KINDS: Dict[str, Tuple[str, ...]] = {
     "extra_time": ("class",),
 }
 
+# Closed catalog of what a child's specialist may ask the child to practice at school: everyday
+# moves and phrases, never a treatment and never a diagnosis. The specialist picks codes.
+EXERCISES: Dict[str, Dict[str, str]] = {
+    "breathe_square": {"en": "square breathing: in for 4, hold for 4, out for 4, wait for 4, three times",
+                       "es": "respiraci\u00f3n cuadrada: tomar aire en 4, sostener 4, soltar en 4, esperar 4, tres veces"},
+    "wall_push": {"en": "push the wall with both hands for 10 seconds, three times",
+                  "es": "empujar la pared con las dos manos 10 segundos, tres veces"},
+    "hand_squeeze": {"en": "squeeze your hands into fists and let go, five times",
+                     "es": "apretar las manos y soltarlas, cinco veces"},
+    "paper_balls": {"en": "make five small paper balls with your fingertips",
+                    "es": "hacer cinco bolitas de papel con la punta de los dedos"},
+    "balance_one_foot": {"en": "stand on one foot and count to 10, then on the other",
+                         "es": "pararte en un pie y contar hasta 10, despu\u00e9s en el otro"},
+    "feelings_word": {"en": "say in one word how you feel right now",
+                      "es": "decir con una palabra c\u00f3mo te sent\u00eds ahora"},
+    "ask_for_help": {"en": "practice asking for help with one sentence: can you help me?",
+                     "es": "practicar pedir ayuda con una frase: \u00bfme ayud\u00e1s?"},
+    "say_hello": {"en": "say hello to someone in your class, with words or with a wave",
+                  "es": "saludar a alguien de tu clase, con palabras o con la mano"},
+}
+
+# Where each exercise fits in the school day.
+EXERCISE_KINDS: Dict[str, Tuple[str, ...]] = {
+    "breathe_square": ("transition", "break", "class"),
+    "wall_push": ("break", "transition"),
+    "hand_squeeze": ("class",),
+    "paper_balls": ("class", "break"),
+    "balance_one_foot": ("break",),
+    "feelings_word": ("transition", "break"),
+    "ask_for_help": ("class", "special"),
+    "say_hello": ("transition",),
+}
+
 Text = Union[str, Dict[str, str]]
 
 
 def support_text(code: str, lang: str) -> str:
     return pick(SUPPORTS[code], lang)
+
+
+def exercise_text(code: str, lang: str) -> str:
+    return pick(EXERCISES[code], lang)
 
 
 @dataclass
@@ -88,6 +125,7 @@ class Student:
     persona: str
     supports: List[str]
     interests: List[Interest]
+    exercises: List[str] = field(default_factory=list)  # codes the child's specialist picked
 
     def __post_init__(self) -> None:
         if self.persona not in PERSONAS:
@@ -98,6 +136,9 @@ class Student:
         if unknown:
             # The text is not echoed: it may be exactly what must not be stored.
             raise ValueError(f"{len(unknown)} support(s) of {self.id} are not in the catalog")
+        unknown = [e for e in self.exercises if e not in EXERCISES]
+        if unknown:
+            raise ValueError(f"{len(unknown)} exercise(s) of {self.id} are not in the catalog")
 
 
 @dataclass
@@ -153,7 +194,8 @@ def load_school(path) -> School:
         students[s["id"]] = Student(
             id=s["id"], alias=s["alias"], age=s["age"], grade=s["grade"],
             persona=s["persona"], supports=list(s["supports"]),
-            interests=[Interest(**i) for i in s["interests"]])
+            interests=[Interest(**i) for i in s["interests"]],
+            exercises=list(s.get("exercises", [])))
     roster = [s.alias for s in students.values()]
     for st in students.values():
         for it in st.interests:

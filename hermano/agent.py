@@ -20,7 +20,8 @@ from typing import Dict, List, Optional, Tuple
 from .approvals import APPROVED, PENDING, REJECTED, Approvals
 from .guard import UnsafeText, scrub, validate_interest
 from .i18n import DEFAULT_LANG, pick, q, t
-from .models import BLOCK_KINDS, SUPPORT_KINDS, SUPPORTS, Adult, Block, School, Student, support_text
+from .models import (BLOCK_KINDS, EXERCISE_KINDS, SUPPORT_KINDS, SUPPORTS, Adult, Block, School, Student,
+                     exercise_text, support_text)
 from .qloo import QlooError, UnsupportedType
 from .ratings import block_reason, content_ratings_for, load_game_ratings
 
@@ -179,6 +180,7 @@ class Step:
     reading: str = ""
     movement: str = ""
     reinforce: str = ""  # for the teacher only, never shown to the child
+    exercise: str = ""  # a code from the specialist's closed catalog
 
 
 def _show(lang: str, domain: str, name: str) -> str:
@@ -243,6 +245,18 @@ def set_reinforcements(plan: Dict, pool: List[Candidate], lang: str) -> None:
                 used.append(name)
 
 
+def place_exercises(student: Student, blocks: List[Block]) -> Dict[int, str]:
+    """Each exercise the child's specialist picked, once a day, at the first block where it
+    fits and no other exercise is. One with no fitting block that day is left out."""
+    placed: Dict[int, str] = {}
+    for code in student.exercises:
+        for i, b in enumerate(blocks):
+            if i not in placed and b.kind in EXERCISE_KINDS[code]:
+                placed[i] = code
+                break
+    return placed
+
+
 def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotation: Rotation,
              approvals: Approvals, lang: str = DEFAULT_LANG) -> Dict:
     """One step per block: first/then cue, change warning, calm-down options, and a reward
@@ -261,6 +275,7 @@ def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotat
     book_i = 0
     moves = movement_options(lang, pool) if MOVEMENT_SUPPORT in student.supports else []
     move_i = 0
+    exercises = place_exercises(student, blocks)
     for i, b in enumerate(blocks):
         activity = b.name(lang)
         dom = item = reward = ""
@@ -290,7 +305,8 @@ def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotat
             movement = moves[move_i % len(moves)]
             move_i += 1
         steps.append(Step(b, activity, t(lang, "first_then", activity=activity, then=then),
-                          warning, calm, dom, item, reward, reading, movement))
+                          warning, calm, dom, item, reward, reading, movement,
+                          exercise=exercises.get(i, "")))
     plan = {"student": student, "lang": lang, "greeting": t(lang, "greeting." + student.persona),
             "steps": steps, "pending": pending}
     set_reinforcements(plan, pool, lang)
@@ -303,6 +319,7 @@ class CheckIn:
     activity: str
     face: str
     support_used: str = ""
+    exercise_done: Optional[bool] = None  # the child's own answer; None if not asked or not told
 
     def __post_init__(self) -> None:
         if self.face not in FACES:
@@ -323,7 +340,8 @@ def demo_checkins(student: Student, plan: Dict, day: int) -> List[CheckIn]:
             fits = [s for s in student.supports if st.block.kind in SUPPORT_KINDS.get(s, BLOCK_KINDS)]
             if fits:
                 support = fits[i % len(fits)]
-        out.append(CheckIn(st.activity, face, support))
+        done = (code >= 3) if st.exercise else None
+        out.append(CheckIn(st.activity, face, support, done))
     return out
 
 
@@ -371,6 +389,9 @@ def _teacher(adult: Adult, school: School, records: Dict, sids: List[str], lang:
         if moves:
             out.append(t(lang, "teacher.movement", items="; ".join(moves)))
         out.extend(s.reinforce for s, c in pairs if s.reinforce)
+        ex = [f"{s.activity}: {exercise_text(s.exercise, lang)}" for s, c in pairs if s.exercise]
+        if ex:
+            out.append(t(lang, "teacher.exercises", items="; ".join(ex)))
         line = _pending_line(lang, "pending.teacher", records, sid)
         if line:
             out.append(line)
@@ -422,6 +443,9 @@ def _family(adult: Adult, school: School, records: Dict, sids: List[str], lang: 
                 [s for s, c in pairs if s.reward_item]
         if items:
             out.append(t(lang, "family.talk", item=_show(lang, items[0].reward_domain, items[0].reward_item)))
+        ex = [exercise_text(s.exercise, lang) for s, c in pairs if s.exercise]
+        if ex:
+            out.append(t(lang, "family.exercises", items="; ".join(ex)))
         line = _pending_line(lang, "pending.family", records, sid, st.alias)
         if line:
             out.append(line)
@@ -443,6 +467,12 @@ def _specialist(adult: Adult, school: School, records: Dict, sids: List[str], la
         offered = sum(1 for s, c in _pairs(records, sid) if s.movement)
         if offered:
             out.append(t(lang, "specialist.movement", n=offered))
+        practiced = [t(lang, "specialist.ex_item", exercise=exercise_text(s.exercise, lang), activity=c.activity,
+                       result=t(lang, "specialist." + ("done" if c.exercise_done else
+                                                      "no_answer" if c.exercise_done is None else "not_done")))
+                     for s, c in _pairs(records, sid) if s.exercise]
+        if practiced:
+            out.append(t(lang, "specialist.exercises", items="; ".join(practiced)))
     return out
 
 

@@ -1,15 +1,18 @@
 {
- "_note": "Invented school for the public demo. No real children, adults or schools. Supports are codes from the catalog in hermano/models.py.",
+ "_note": "Invented school for the public demo. No real children, adults or schools. Supports and exercises are codes from the catalogs in hermano/models.py.",
  "school": {"en": "Demo school (invented data)", "es": "Escuela de demo (datos inventados)"},
  "students": [
   {"id": "s1", "alias": "Leo", "age": 8, "grade": {"en": "3rd grade", "es": "3° grado"}, "persona": "hermano",
    "supports": ["warn_before_change", "one_instruction", "quiet_corner"],
+   "exercises": ["breathe_square", "wall_push", "paper_balls"],
    "interests": [{"name": "Bluey", "kind": "tv_show"}, {"name": "Minecraft", "kind": "video_game"}]},
   {"id": "s2", "alias": "Sofi", "age": 11, "grade": {"en": "6th grade", "es": "6° grado"}, "persona": "hermana",
    "supports": ["movement_break", "split_tasks", "seat_away_from_door"],
+   "exercises": ["hand_squeeze", "balance_one_foot"],
    "interests": [{"name": "Tini", "kind": "artist"}, {"name": "Harry Potter", "kind": "book"}]},
   {"id": "s3", "alias": "Mati", "age": 14, "grade": {"en": "Year 2, secondary school", "es": "2° año"}, "persona": "hermano",
    "supports": ["warn_before_speaking", "headphones_noisy_breaks"],
+   "exercises": ["feelings_word", "ask_for_help", "say_hello"],
    "interests": [{"name": "Dragon Ball", "kind": "tv_show"}, {"name": "Lionel Messi", "kind": "person"}]}
  ],
  "adults": [
