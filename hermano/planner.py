@@ -1,7 +1,8 @@
 """Agent planner: the language model chooses, the code decides what is allowed.
 
 The model works only with tools and the placeholder STUDENT_1. It can do two things:
-1. choose which adult-approved motivator follows each class or special block;
+1. choose which adult-approved motivator follows each class or special block, never the same
+   one twice in a day;
 2. suggest up to two new ideas from Qloo's list for an adult to approve, with one sentence why.
 Every choice is checked in code: a reward after recess, an idea nobody approved or a reason with
 a health word is refused, and the model is told why. The child only ever sees titles an adult
@@ -28,7 +29,9 @@ SYSTEM = ("You are Hermano's planner for one school day of one child, called STU
           "Never use or invent a name. First call get_day and get_motivators. Then call "
           "submit_plan once with: one approved motivator (an M id) for each class or special "
           "block, changing domain from one block to the next when you can and avoiding the "
-          "recently used ones; never a reward after recess, arrival or dismissal; and at most "
+          "recently used ones; never the same motivator twice in one day (if there are fewer "
+          "motivators than blocks, leave the extra blocks out); never a reward after recess, "
+          "arrival or dismissal; and at most "
           "{n} new ideas from the candidates (C ids), each with one short sentence in {language} "
           "about why it fits the child's tastes. If submit_plan lists problems, fix them and "
           "submit again. When it is accepted, answer with the word done.")
@@ -47,6 +50,17 @@ def _schema(description: str, properties: Optional[dict] = None, required=()) ->
     if required:
         params["required"] = list(required)
     return {"description": description, "parameters": params}
+
+
+def _set_reward(st, lang: str, c: Optional[Candidate]) -> None:
+    """Put motivator c (or the generic reward, if c is None) after this step."""
+    if c is None:
+        st.reward_domain = st.reward_item = ""
+        st.reward = t(lang, "reward.default")
+    else:
+        st.reward_domain, st.reward_item = c.domain, c.name
+        st.reward = t(lang, "reward." + c.domain, x=_show(lang, c.domain, c.name))
+    st.first_then = t(lang, "first_then", activity=st.activity, then=st.reward)
 
 
 def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
@@ -100,6 +114,9 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
                 problems.append(f"{bid}: rewards only follow class or special blocks")
             elif mid not in m_ids:
                 problems.append(f"{bid}: {mid} is not an approved motivator")
+            elif any(m_ids[mid] is c for c in new_assigned.values()):
+                problems.append(f"{bid}: {mid} is already used today; choose another one or "
+                                "leave this block out")
             else:
                 new_assigned[i] = m_ids[mid]
         new_suggested: List[dict] = []
@@ -146,10 +163,18 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
         return plan
 
     for i, c in assigned.items():
-        st = plan["steps"][i]
-        st.reward_domain, st.reward_item = c.domain, c.name
-        st.reward = t(lang, "reward." + c.domain, x=_show(lang, c.domain, c.name))
-        st.first_then = t(lang, "first_then", activity=st.activity, then=st.reward)
+        _set_reward(plan["steps"][i], lang, c)
+    # Blocks the model left out keep the rule-based reward, unless the model already gave that
+    # title today: then the next unused approved motivator, or the generic reward.
+    today = {(c.domain, c.name) for c in assigned.values()}
+    for i, st in enumerate(plan["steps"]):
+        if i in assigned or not st.reward_item:
+            continue
+        if (st.reward_domain, st.reward_item) in today:
+            spare = next((c for c in approved if (c.domain, c.name) not in today), None)
+            _set_reward(st, lang, spare)
+        if st.reward_item:
+            today.add((st.reward_domain, st.reward_item))
     # Rotation remembers what the child actually got today.
     rotation.used[student.id] = recent + [(s.reward_domain, s.reward_item)
                                           for s in plan["steps"] if s.reward_item]

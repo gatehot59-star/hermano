@@ -167,6 +167,35 @@ class TestPlan(Base):
         self.assertGreaterEqual(n, 3)
         self.assertEqual(len(seen[:n]), len(set(seen[:n])))
 
+    def test_the_same_reward_never_comes_twice_in_a_day(self):
+        rotation, profiles = Rotation(), None
+        for day in range(4):
+            records, profiles = self.day(day=day, rotation=rotation, profiles=profiles)
+            for sid, rec in records.items():
+                items = [s.reward_item for s in rec["plan"]["steps"] if s.reward_item]
+                self.assertEqual(len(items), len(set(items)), (day, sid, items))
+
+    def test_when_the_rewards_run_out_the_child_chooses_with_the_teacher(self):
+        # Live 2026-10-08: with one favorite, Leo got Bluey after all three classes.
+        records, _ = run_day(self.school, self.qloo, Rotation(), Approvals(), 0)
+        leo = [s.reward_item or s.reward for s in records["s1"]["plan"]["steps"] if s.block.kind in WORK_KINDS]
+        self.assertEqual(leo, ["Bluey", t("en", "reward.default"), t("en", "reward.default")])
+        sofi = [s.reward_item or s.reward for s in records["s2"]["plan"]["steps"] if s.block.kind in WORK_KINDS]
+        self.assertEqual(sorted(sofi[:2]), ["Harry Potter", "Tini"])
+        self.assertEqual(sofi[2:], [t("en", "reward.default")] * (len(sofi) - 2))
+
+    def test_rewards_cycle_in_rounds_across_days_without_repeating_in_a_day(self):
+        r = Rotation()
+        pool = [("book", x) for x in "ABCD"]
+        seq = []
+        for day in range(3):  # three classes a day, four motivators
+            today = []
+            for _ in range(3):
+                today.append(r.pick("x", pool, avoid=today))
+            seq += [x for _, x in today]
+        self.assertEqual("".join(seq), "ABCDABCDA")
+        self.assertIsNone(r.pick("x", pool, avoid=pool))
+
     def test_the_child_picks_hermano_or_hermana(self):
         for lang, he, she in (("es", "Soy tu hermano", "Soy tu hermana"), ("en", "I'm your hermano", "I'm your hermana")):
             records, _ = self.day(lang)

@@ -144,13 +144,18 @@ class Rotation:
     def __init__(self) -> None:
         self.used: Dict[str, List[Tuple[str, str]]] = {}
 
-    def pick(self, student_id: str, pool: List[Tuple[str, str]]) -> Optional[Tuple[str, str]]:
+    def pick(self, student_id: str, pool: List[Tuple[str, str]],
+             avoid=()) -> Optional[Tuple[str, str]]:
+        """The least recently used motivator in pool, never one in avoid (today's rewards so
+        far); None if every motivator was already given today."""
+        avoid = set(avoid)
+        pool = [p for p in pool if p not in avoid]
         if not pool:
             return None
         used = self.used.setdefault(student_id, [])
         fresh = [p for p in pool if p not in used]
         if not fresh:
-            used.clear()
+            used.clear()  # every motivator came once: a new round starts
             fresh = list(pool)
         used.append(fresh[0])
         return fresh[0]
@@ -194,7 +199,8 @@ def motivators(student: Student, profile: TasteProfile, approvals: Approvals) ->
 def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotation: Rotation,
              approvals: Approvals, lang: str = DEFAULT_LANG) -> Dict:
     """One step per block: first/then cue, change warning, calm-down options, and a reward
-    after classes. Only ideas an adult approved, and the child's own favorites, reach the child."""
+    after classes, never the same one twice in a day. Only ideas an adult approved, and the
+    child's own favorites, reach the child."""
     ideas = profile.pool()
     pool = motivators(student, profile, approvals)
     pending = [c for c in ideas if approvals.status(student.id, c.domain, c.name) == PENDING]
@@ -202,13 +208,17 @@ def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotat
     artists = [c.name for c in pool if c.domain == "artist"]
     books = [c.name for c in pool if c.domain == "book"]
     steps: List[Step] = []
+    today: List[Tuple[str, str]] = []
     book_i = 0
     for i, b in enumerate(blocks):
         activity = b.name(lang)
         dom = item = reward = ""
         if b.kind in WORK_KINDS:
-            chosen = rotation.pick(student.id, picks)
+            # The same title never comes twice in one day: when the approved ones run out,
+            # the child chooses a game with the teacher instead.
+            chosen = rotation.pick(student.id, picks, avoid=today)
             if chosen:
+                today.append(chosen)
                 dom, item = chosen
                 reward = t(lang, "reward." + dom, x=_show(lang, dom, item))
             else:

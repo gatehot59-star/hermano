@@ -77,6 +77,29 @@ class PlannerTest(unittest.TestCase):
         tool = [m for m in body(self.net.requests[-1])["messages"] if m["role"] == "tool"][0]
         self.assertIn("Bluey", [m["title"] for m in json.loads(tool["content"])["approved"]])
 
+    def test_the_model_cannot_give_the_same_reward_twice_in_a_day(self):
+        twice = [{"block_id": "B2", "motivator_id": "M5"}, {"block_id": "B4", "motivator_id": "M5"}]
+        plan = self.run_with(calls(("get_day", {}), ("get_motivators", {})),
+                             calls(("submit_plan", {"rewards": twice})), done())
+        answer = json.loads(body(self.net.requests[2])["messages"][-1]["content"])
+        self.assertEqual(answer["accepted_rewards"], 1)
+        self.assertIn("already used today", answer["problems"][0])
+        self.assertIn("same motivator twice in one day", body(self.net.requests[0])["messages"][0]["content"])
+        items = [s.reward_item for s in plan["steps"] if s.reward_item]
+        self.assertEqual(plan["steps"][1].reward_item, "Toy Story")
+        self.assertEqual(len(items), len(set(items)), items)
+
+    def test_a_block_the_model_left_out_does_not_repeat_its_choice(self):
+        # The rule plan puts Canticuenticos after B4; the model puts it after B2 and stops there.
+        plan = self.run_with(calls(("get_motivators", {})),
+                             calls(("submit_plan", {"rewards": [{"block_id": "B2", "motivator_id": "M2"}]})),
+                             done())
+        got = [s.reward_item for s in plan["steps"] if s.reward_item]
+        self.assertEqual(got[0], "Canticu\u00e9nticos")
+        self.assertEqual(len(got), len(set(got)), got)
+        self.assertEqual(plan["steps"][3].reward_item, "Where the Wild Things Are")
+        self.assertIn("Where the Wild Things Are", plan["steps"][3].first_then)
+
     def test_the_model_chooses_among_approved_ideas(self):
         plan = self.good_run()
         self.assertEqual(plan["planner"], "llm")
