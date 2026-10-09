@@ -27,6 +27,9 @@ from .ratings import block_reason, content_ratings_for, load_game_ratings
 DOMAINS = ("book", "artist", "tv_show", "video_game", "movie")
 # Rewards come after effort: never after recess, arrival or dismissal.
 WORK_KINDS = ("class", "special")
+# Movement breaks happen inside classes, and only for children whose adults agreed the support.
+MOVEMENT_SUPPORT = "movement_break"
+GENERIC_MOVES = ("move.stretch", "move.march", "move.errand")
 FACES = ("bien", "mas_o_menos", "dificil")
 FACE_ICON = {"bien": "\U0001F600", "mas_o_menos": "\U0001F610", "dificil": "\U0001F61F"}
 
@@ -172,6 +175,7 @@ class Step:
     reward_item: str = ""
     reward: str = ""
     reading: str = ""
+    movement: str = ""
 
 
 def _show(lang: str, domain: str, name: str) -> str:
@@ -196,6 +200,15 @@ def motivators(student: Student, profile: TasteProfile, approvals: Approvals) ->
     return out
 
 
+def movement_options(lang: str, pool: List[Candidate]) -> List[str]:
+    """Movement breaks made from the child's own approved tastes: dance to an artist, move like
+    a character from a show, movie or game; then simple moves anyone can do in a classroom."""
+    out = [t(lang, "move.dance", x=c.name) for c in pool if c.domain == "artist"]
+    out += [t(lang, "move.like", x=q(lang, c.name)) for c in pool
+            if c.domain in ("tv_show", "movie", "video_game")]
+    return out + [t(lang, k) for k in GENERIC_MOVES]
+
+
 def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotation: Rotation,
              approvals: Approvals, lang: str = DEFAULT_LANG) -> Dict:
     """One step per block: first/then cue, change warning, calm-down options, and a reward
@@ -212,6 +225,8 @@ def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotat
     steps: List[Step] = []
     today: List[Tuple[str, str]] = []
     book_i = 0
+    moves = movement_options(lang, pool) if MOVEMENT_SUPPORT in student.supports else []
+    move_i = 0
     for i, b in enumerate(blocks):
         activity = b.name(lang)
         dom = item = reward = ""
@@ -236,8 +251,12 @@ def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotat
         if b.kind == "class" and b.topic_name(lang) and books:
             reading = t(lang, "reading", topic=b.topic_name(lang), book=q(lang, books[book_i % len(books)]))
             book_i += 1
+        movement = ""
+        if moves and b.kind == "class":
+            movement = moves[move_i % len(moves)]
+            move_i += 1
         steps.append(Step(b, activity, t(lang, "first_then", activity=activity, then=then),
-                          warning, calm, dom, item, reward, reading))
+                          warning, calm, dom, item, reward, reading, movement))
     return {"student": student, "lang": lang, "greeting": t(lang, "greeting." + student.persona),
             "steps": steps, "pending": pending}
 
@@ -312,6 +331,9 @@ def _teacher(adult: Adult, school: School, records: Dict, sids: List[str], lang:
         reads = [s.reading for s, c in pairs if s.reading]
         if reads:
             out.append(t(lang, "teacher.readings", items=" ".join(reads)))
+        moves = [f"{s.activity}: {s.movement.split(': ', 1)[-1]}" for s, c in pairs if s.movement]
+        if moves:
+            out.append(t(lang, "teacher.movement", items="; ".join(moves)))
         line = _pending_line(lang, "pending.teacher", records, sid)
         if line:
             out.append(line)
@@ -381,6 +403,9 @@ def _specialist(adult: Adult, school: School, records: Dict, sids: List[str], la
             used = support_text(c.support_used, lang) if c.support_used else "-"
             out.append(f"{s.block.start}-{s.block.end} | {c.activity} | {t(lang, 'face.' + c.face)} | "
                        f"{used} | {s.reward_item or '-'}")
+        offered = sum(1 for s, c in _pairs(records, sid) if s.movement)
+        if offered:
+            out.append(t(lang, "specialist.movement", n=offered))
     return out
 
 
