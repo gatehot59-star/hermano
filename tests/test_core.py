@@ -385,6 +385,61 @@ class TestAgeGate(Base):
         self.assertEqual(leo.why_blocked["movie:One Day"], "unrated")
 
 
+class TestMovement(Base):
+    """Movement breaks with the child's own music and shows, only where the adults agreed them."""
+
+    def moves(self, plan):
+        return [s.movement for s in plan["steps"] if s.movement]
+
+    def test_movement_breaks_only_in_classes_and_only_with_the_agreed_support(self):
+        records, _ = self.day()
+        sofi = records["s2"]["plan"]["steps"]  # Sofi's adults agreed movement_break
+        for s in sofi:
+            self.assertEqual(bool(s.movement), s.block.kind == "class", (s.activity, s.movement))
+        for sid in ("s1", "s3"):  # Leo and Mati did not
+            self.assertEqual(self.moves(records[sid]["plan"]), [], sid)
+
+    def test_she_dances_to_her_own_music_first(self):
+        records, profiles = self.day()
+        moves = self.moves(records["s2"]["plan"])
+        self.assertEqual(moves[0], t("en", "move.dance", x="Tini"))  # her own favorite
+        self.assertTrue(moves[1].startswith("Movement break: move like a character from "))
+        self.assertEqual(len(moves), len(set(moves)))
+
+    def test_only_approved_or_favorite_titles_go_into_a_movement_break(self):
+        records, profiles = self.day()
+        allowed = {c.name for c in motivators(self.school.students["s2"], profiles["s2"], self.approvals)}
+        text = " ".join(self.moves(records["s2"]["plan"]))
+        for c in records["s2"]["plan"]["pending"]:
+            self.assertFalse(word_in(c.name, text), c.name)
+        self.assertTrue(any(word_in(n, text) for n in allowed))
+
+    def test_without_tastes_the_moves_are_simple_classroom_moves(self):
+        st = Student(id="x", alias="Nadie", age=9, grade="4", persona="hermana",
+                     supports=["movement_break"], interests=[])
+        prof = build_profile(st, self.qloo, ["Nadie"], Approvals())
+        plan = plan_day(st, self.school.schedules["s1"], prof, Rotation(), Approvals(), "es")
+        self.assertEqual(self.moves(plan)[0], t("es", "move.stretch"))
+        self.assertTrue(all(m.startswith("Pausa para moverte: ") for m in self.moves(plan)))
+
+    def test_a_show_becomes_a_way_to_move_when_there_is_no_music(self):
+        st = Student(id="x", alias="Nadie", age=8, grade="3", persona="hermano",
+                     supports=["movement_break"], interests=[Interest("Bluey", "tv_show")])
+        prof = build_profile(st, self.qloo, ["Nadie"], Approvals())
+        plan = plan_day(st, self.school.schedules["s1"], prof, Rotation(), Approvals())
+        self.assertEqual(self.moves(plan)[0], t("en", "move.like", x=q("en", "Bluey")))
+
+    def test_the_teacher_and_the_specialist_see_the_movement_breaks(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            teacher, therapist = self.report("a2", records, lang), self.report("a9", records, lang)
+            self.assertIn(t(lang, "teacher.movement", items="").rstrip(), teacher)
+            n = len(self.moves(records["s2"]["plan"]))
+            self.assertIn(t(lang, "specialist.movement", n=n), therapist)
+            self.assertNotIn(t(lang, "teacher.movement", items="").rstrip(), self.report("a1", records, lang))
+            self.assertFalse(contains_health(teacher + therapist))
+
+
 class TestOwnFavorites(Base):
     def test_the_childs_own_favorites_are_rewards_from_day_one(self):
         records, profiles = run_day(self.school, self.qloo, Rotation(), Approvals(), 0)
