@@ -12,9 +12,9 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from hermano.agent import _show, plan_day
+from hermano.agent import _show, demo_checkins, plan_day
 from hermano.i18n import t
-from hermano.models import SUPPORTS, load_school
+from hermano.models import SUPPORTS, exercise_text, load_school
 from hermano.qloo import make_client
 from hermano.web import CSP, SESSION_COOKIE, SESSION_TTL, App, esc, make_app, make_server
 from tests.helpers import DATA
@@ -152,6 +152,30 @@ class TestPages(WebCase):
             self.assertNotIn(esc(idea), family)
         again = self.plan(self.app(), "s1")  # a new app reads the plans from the cache
         self.assertEqual([s.reinforce for s in again["steps"]], [s.reinforce for s in self.plan(app, "s1")["steps"]])
+
+    def test_the_child_says_if_he_did_the_exercise_and_the_specialist_reads_it(self):
+        app = self.app()
+        steps = self.plan(app, "s1")["steps"]
+        i = next(n for n, s in enumerate(steps) if s.exercise)
+        text = exercise_text(steps[i].exercise, "en")
+        b = Browser(app)
+        child = b.get("/child/s1")[2]
+        self.assertIn(esc(t("en", "exercise.child", x=text)), child)
+        self.assertIn("name='did' value='yes'", child)
+        invented = demo_checkins(self.school.students["s1"], self.plan(app, "s1"), 0)[i].exercise_done
+        answer = "no" if invented else "yes"  # the opposite of the invented answer, so it shows
+        status, headers, _ = b.post("/child/s1/checkin", step=i, did=answer)
+        self.assertEqual(status, 303)
+        result = t("en", "specialist." + ("done" if answer == "yes" else "not_done"))
+        line = t("en", "specialist.ex_item", exercise=text, activity=steps[i].activity, result=result)
+        self.assertIn(esc(line), b.get("/adult/a8")[2])
+        self.assertNotIn(esc(line), Browser(app).get("/adult/a8")[2])  # another visitor
+        self.assertIn("class='picked'", b.get("/child/s1")[2])
+        plain = next(n for n, s in enumerate(steps) if not s.exercise)
+        self.assertEqual(b.post("/child/s1/checkin", step=plain, did="yes")[0], 400)
+        self.assertEqual(b.post("/child/s1/checkin", step=i, did="maybe")[0], 400)
+        again = self.plan(self.app(), "s1")  # a new app reads the plans from the cache
+        self.assertEqual([s.exercise for s in again["steps"]], [s.exercise for s in steps])
 
     def test_family_and_teacher_see_the_agents_suggestion_with_its_reason(self):
         app = self.app(("rules", Planner(suggest=True)))

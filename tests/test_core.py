@@ -15,7 +15,8 @@ from hermano.agent import WORK_KINDS, Rotation, build_profile, motivators, plan_
 from hermano.approvals import APPROVED, PENDING, REJECTED, Approvals
 from hermano.guard import contains_health
 from hermano.i18n import TEXT, q, t
-from hermano.models import SUPPORTS, Interest, Student, load_school, support_text
+from hermano.models import (EXERCISE_KINDS, EXERCISES, SUPPORTS, Block, Interest, Student, exercise_text,
+                            load_school, support_text)
 from hermano.qloo import MockQloo, QlooClient
 from tests.helpers import DATA, ROOT, Recorder, http_error
 
@@ -53,6 +54,10 @@ class TestPrivacy(Base):
                 self.assertNotIn(code, sent)
                 for lang in ("en", "es"):
                     self.assertNotIn(support_text(code, lang).lower(), sent.lower())
+            for code in st.exercises:
+                self.assertNotIn(code, sent)
+                for lang in ("en", "es"):
+                    self.assertNotIn(exercise_text(code, lang).lower(), sent.lower())
 
     def test_free_text_with_names_or_health_never_reaches_qloo(self):
         rec = Recorder()
@@ -508,6 +513,77 @@ class TestReinforcement(Base):
                 self.assertIn(idea, self.report("a1", records, lang))
             for aid in ("a2", "a4", "a5", "a8"):  # another teacher, principal, family, specialist
                 self.assertFalse(any(idea in self.report(aid, records, lang) for idea in leo), aid)
+
+
+class TestExercises(Base):
+    """What the child's specialist asked the child to practice: a closed catalog, once a day each,
+    where it fits; the child says if she did it, and the specialist reads it."""
+
+    def placed(self, plan):
+        return [(s.block.kind, s.exercise) for s in plan["steps"] if s.exercise]
+
+    def test_each_agreed_exercise_comes_once_a_day_where_it_fits(self):
+        records, _ = self.day()
+        for sid, rec in records.items():
+            st = self.school.students[sid]
+            got = self.placed(rec["plan"])
+            self.assertTrue(st.exercises, sid)
+            self.assertEqual(sorted(code for _, code in got), sorted(st.exercises), sid)
+            for kind, code in got:
+                self.assertIn(kind, EXERCISE_KINDS[code], (sid, code))
+
+    def test_one_with_no_fitting_moment_is_left_out(self):
+        st = Student(id="x", alias="Nadie", age=9, grade="4", persona="hermana", supports=[], interests=[],
+                     exercises=["balance_one_foot", "hand_squeeze"])  # break only, class only
+        blocks = [Block("08:00", "08:40", "Math", "class", "addition")]
+        plan = plan_day(st, blocks, build_profile(st, self.qloo, ["Nadie"], Approvals()), Rotation(), Approvals())
+        self.assertEqual(self.placed(plan), [("class", "hand_squeeze")])
+
+    def test_the_catalog_is_closed_and_free_text_is_not_echoed(self):
+        with self.assertRaises(ValueError) as cm:
+            Student(id="x", alias="Nadie", age=9, grade="4", persona="hermana", supports=[], interests=[],
+                    exercises=["tomar la pastilla a las 10"])
+        self.assertNotIn("pastilla", str(cm.exception))
+        raw = json.loads((DATA / "demo_school.json").read_text(encoding="utf-8"))
+        raw["students"][0]["exercises"] = ["sesion de terapia con la doctora"]
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "school.json"
+            p.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_school(p)
+
+    def test_the_catalog_has_no_health_words_and_both_languages(self):
+        self.assertEqual(set(EXERCISES), set(EXERCISE_KINDS))
+        for code, text in EXERCISES.items():
+            self.assertEqual(set(text), {"en", "es"}, code)
+            for lang in ("en", "es"):
+                self.assertFalse(contains_health(text[lang]), (code, lang))
+
+    def test_the_specialist_reads_what_the_child_said(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            for aid, sid in (("a8", "s1"), ("a8", "s3"), ("a9", "s2")):
+                report = self.report(aid, records, lang)
+                for s, c in zip(records[sid]["plan"]["steps"], records[sid]["checkins"]):
+                    if s.exercise:
+                        result = "done" if c.exercise_done else "not_done"
+                        self.assertIn(t(lang, "specialist.ex_item", exercise=exercise_text(s.exercise, lang),
+                                        activity=c.activity, result=t(lang, "specialist." + result)), report)
+            both = [c.exercise_done for r in records.values() for c in r["checkins"] if c.exercise_done is not None]
+            self.assertEqual(len(both), 8)
+            self.assertIn(True, both)
+            self.assertIn(False, both)
+
+    def test_the_teacher_and_the_family_get_the_reminders_the_principal_does_not(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            texts = [exercise_text(c, lang) for c in self.school.students["s1"].exercises]
+            teacher, family, principal = (self.report(a, records, lang) for a in ("a1", "a5", "a4"))
+            for x in texts:
+                self.assertIn(x, teacher)
+                self.assertIn(x, family)
+            self.assertFalse(any(exercise_text(c, lang) in principal for c in EXERCISES))
+            self.assertFalse(any(x in self.report("a2", records, lang) for x in texts))  # another teacher
 
 
 class TestOwnFavorites(Base):

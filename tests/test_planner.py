@@ -5,7 +5,7 @@ import unittest
 from hermano import llm
 from hermano.agent import Rotation, build_profile, plan_day, report_for, run_day
 from hermano.approvals import Approvals
-from hermano.models import SUPPORTS, load_school, support_text
+from hermano.models import EXERCISES, SUPPORTS, exercise_text, load_school, support_text
 from hermano.planner import MAX_SUGGESTIONS, forbidden_names, llm_plan_day
 from hermano.qloo import MockQloo
 from tests.helpers import DATA, Recorder, http_error
@@ -173,6 +173,15 @@ class PlannerTest(unittest.TestCase):
         for code in SUPPORTS:
             self.assertNotIn(code, sent)
             self.assertNotIn(support_text(code, "en"), sent)
+
+    def test_no_exercise_goes_to_the_model(self):
+        self.good_run()
+        sent = " ".join(r.data.decode("utf-8") for r in self.net.requests)
+        self.assertTrue(self.leo.exercises)
+        for code in EXERCISES:
+            self.assertNotIn(code, sent)
+            for lang in ("en", "es"):
+                self.assertNotIn(exercise_text(code, lang), sent)
 
     def test_model_down_keeps_the_rule_plan(self):
         plan = self.run_with(http_error(llm.GROQ_URL, 503))
