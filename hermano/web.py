@@ -107,7 +107,8 @@ def dump_records(records: Dict) -> Dict:
             "model": p.get("model", ""), "planner_note": p.get("planner_note", ""),
             "steps": [{"activity": s.activity, "first_then": s.first_then, "warning": s.warning,
                        "calm": list(s.calm), "reward_domain": s.reward_domain,
-                       "reward_item": s.reward_item, "reward": s.reward, "reading": s.reading}
+                       "reward_item": s.reward_item, "reward": s.reward, "reading": s.reading,
+                       "movement": s.movement}
                       for s in p["steps"]],
             "pending": [_cand(c) for c in p["pending"]],
             "suggested": [{"candidate": _cand(x["candidate"]), "reason": x["reason"]}
@@ -125,7 +126,8 @@ def load_records(school: School, data: Dict, lang: str) -> Dict:
         if len(blocks) != len(d["steps"]):
             raise ValueError("cached plan does not match the schedule")
         steps = [Step(b, s["activity"], s["first_then"], s["warning"], list(s["calm"]),
-                      s["reward_domain"], s["reward_item"], s["reward"], s["reading"])
+                      s["reward_domain"], s["reward_item"], s["reward"], s["reading"],
+                      s.get("movement", ""))
                  for b, s in zip(blocks, d["steps"])]
         plan = {"student": school.students[sid], "lang": lang, "greeting": d["greeting"],
                 "steps": steps, "pending": [_uncand(c) for c in d["pending"]],
@@ -470,9 +472,10 @@ class App:
             warn = (f"<p class='warn'>\u23f0 {esc(t(lang, 'cli.warning'))}: {esc(s.warning)}</p>"
                     if s.warning else "")
             calm = "".join(f"<li>{esc(c)}</li>" for c in s.calm)
+            move = f"<p class='move'>\U0001F57A {esc(s.movement)}</p>" if s.movement else ""
             parts.append(
                 f"<section class='step kind-{esc(b.kind)}' id='s{i}'><p class='time'>{esc(b.start)}-{esc(b.end)}</p>"
-                f"<p class='ft'>{esc(s.first_then)}</p>{warn}"
+                f"<p class='ft'>{esc(s.first_then)}</p>{warn}{move}"
                 f"<details><summary>{esc(t(lang, 'web.calm'))}</summary><ul>{calm}</ul></details>"
                 f"<form class='faces' method='post' action='/child/{esc(sid)}/checkin'>"
                 f"<input type='hidden' name='lang' value='{lang}'><input type='hidden' name='step' value='{i}'>"

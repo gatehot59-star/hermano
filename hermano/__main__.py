@@ -82,6 +82,8 @@ def main(argv=None) -> int:
                     print(f"  {s.block.start}  {s.first_then}")
                     if s.warning:
                         print(f"         {t(lang, 'cli.warning')}: {s.warning}")
+                    if s.movement:
+                        print(f"         {s.movement}")
             for adult in school.adults.values():
                 print("\n" + "-" * 64)
                 print(report_for(adult, school, records, lang))

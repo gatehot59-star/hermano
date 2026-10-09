@@ -127,6 +127,19 @@ class TestPages(WebCase):
         for code in self.school.students["s1"].supports:
             self.assertNotIn(esc(SUPPORTS[code]["en"]), body)
 
+    def test_the_child_view_shows_the_movement_breaks_and_the_cache_keeps_them(self):
+        app = self.app()
+        plan = self.plan(app, "s2")
+        moves = [s.movement for s in plan["steps"] if s.movement]
+        self.assertTrue(moves)
+        _, _, body = Browser(app).get("/child/s2")
+        for m in moves:
+            self.assertIn(esc(m), body)
+        again = self.plan(self.app(), "s2")  # a new app reads the plans from the cache
+        self.assertEqual([s.movement for s in again["steps"]], [s.movement for s in plan["steps"]])
+        _, _, leo = Browser(app).get("/child/s1")
+        self.assertNotIn("class='move'", leo)
+
     def test_family_and_teacher_see_the_agents_suggestion_with_its_reason(self):
         app = self.app(("rules", Planner(suggest=True)))
         b = Browser(app)
