@@ -167,22 +167,44 @@ class TestPlan(Base):
         self.assertGreaterEqual(n, 3)
         self.assertEqual(len(seen[:n]), len(set(seen[:n])))
 
-    def test_the_same_reward_never_comes_twice_in_a_day(self):
+    def test_a_qloo_idea_never_comes_twice_in_a_day(self):
         rotation, profiles = Rotation(), None
         for day in range(4):
             records, profiles = self.day(day=day, rotation=rotation, profiles=profiles)
             for sid, rec in records.items():
-                items = [s.reward_item for s in rec["plan"]["steps"] if s.reward_item]
+                favorites = {c.name for c in profiles[sid].own}
+                items = [s.reward_item for s in rec["plan"]["steps"]
+                         if s.reward_item and s.reward_item not in favorites]
                 self.assertEqual(len(items), len(set(items)), (day, sid, items))
 
-    def test_when_the_rewards_run_out_the_child_chooses_with_the_teacher(self):
-        # Live 2026-10-08: with one favorite, Leo got Bluey after all three classes.
+    def test_favorites_come_back_once_the_other_ideas_ran_out(self):
+        # Decided by Jorge Abraham Mendieta, 2026-10-08: the child's favorites may repeat.
         records, _ = run_day(self.school, self.qloo, Rotation(), Approvals(), 0)
-        leo = [s.reward_item or s.reward for s in records["s1"]["plan"]["steps"] if s.block.kind in WORK_KINDS]
-        self.assertEqual(leo, ["Bluey", t("en", "reward.default"), t("en", "reward.default")])
-        sofi = [s.reward_item or s.reward for s in records["s2"]["plan"]["steps"] if s.block.kind in WORK_KINDS]
-        self.assertEqual(sorted(sofi[:2]), ["Harry Potter", "Tini"])
-        self.assertEqual(sofi[2:], [t("en", "reward.default")] * (len(sofi) - 2))
+        leo = [s.reward_item for s in records["s1"]["plan"]["steps"] if s.block.kind in WORK_KINDS]
+        self.assertEqual(leo, ["Bluey"] * len(leo))
+        sofi = [s.reward_item for s in records["s2"]["plan"]["steps"] if s.block.kind in WORK_KINDS]
+        self.assertEqual(sorted(sofi[:2]), ["Harry Potter", "Tini"])  # both before either repeats
+        self.assertTrue(set(sofi[2:]) <= {"Harry Potter", "Tini"})
+
+    def test_without_favorites_a_qloo_idea_is_not_repeated_the_child_chooses_with_the_teacher(self):
+        st = Student(id="x", alias="Nadie", age=14, grade="2", persona="hermano", supports=[],
+                     interests=[Interest("Lionel Messi", "person")])  # a person is never a reward
+        approvals = Approvals({"x": {"approved": ["book:futbol\u00edsimos", "movie:kung fu panda"]}})
+        prof = build_profile(st, self.qloo, ["Nadie"], approvals)
+        self.assertEqual(prof.own, [])
+        plan = plan_day(st, self.school.schedules["s1"], prof, Rotation(), approvals)
+        got = [s.reward_item or s.reward for s in plan["steps"] if s.block.kind in WORK_KINDS]
+        self.assertEqual(sorted(got[:2]), ["Futbol\u00edsimos", "Kung Fu Panda"])
+        self.assertEqual(got[2:], [t("en", "reward.default")] * (len(got) - 2))
+
+    def test_a_favorite_waits_while_new_approved_ideas_are_left(self):
+        r = Rotation()
+        pool = [("tv_show", "Fav"), ("book", "A"), ("movie", "B")]
+        fav = {("tv_show", "Fav")}
+        today = []
+        for _ in range(4):
+            today.append(r.pick("x", pool, avoid=[p for p in today if p not in fav]))
+        self.assertEqual([n for _, n in today], ["Fav", "A", "B", "Fav"])
 
     def test_rewards_cycle_in_rounds_across_days_without_repeating_in_a_day(self):
         r = Rotation()

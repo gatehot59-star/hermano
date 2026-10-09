@@ -199,12 +199,14 @@ def motivators(student: Student, profile: TasteProfile, approvals: Approvals) ->
 def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotation: Rotation,
              approvals: Approvals, lang: str = DEFAULT_LANG) -> Dict:
     """One step per block: first/then cue, change warning, calm-down options, and a reward
-    after classes, never the same one twice in a day. Only ideas an adult approved, and the
-    child's own favorites, reach the child."""
+    after classes. A Qloo idea comes at most once a day; the child's own favorites come back
+    when the other approved ideas run out. Only ideas an adult approved, and the child's own
+    favorites, reach the child."""
     ideas = profile.pool()
     pool = motivators(student, profile, approvals)
     pending = [c for c in ideas if approvals.status(student.id, c.domain, c.name) == PENDING]
     picks = [(c.domain, c.name) for c in pool]
+    favorites = {(c.domain, c.name) for c in profile.own}
     artists = [c.name for c in pool if c.domain == "artist"]
     books = [c.name for c in pool if c.domain == "book"]
     steps: List[Step] = []
@@ -214,9 +216,9 @@ def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotat
         activity = b.name(lang)
         dom = item = reward = ""
         if b.kind in WORK_KINDS:
-            # The same title never comes twice in one day: when the approved ones run out,
-            # the child chooses a game with the teacher instead.
-            chosen = rotation.pick(student.id, picks, avoid=today)
+            # A Qloo idea never comes twice in one day. The child's own favorites may: once
+            # every approved motivator came, the rotation starts again with them.
+            chosen = rotation.pick(student.id, picks, avoid=[p for p in today if p not in favorites])
             if chosen:
                 today.append(chosen)
                 dom, item = chosen

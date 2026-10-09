@@ -89,6 +89,21 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(plan["steps"][1].reward_item, "Toy Story")
         self.assertEqual(len(items), len(set(items)), items)
 
+    def test_the_model_may_repeat_a_favorite_only_when_the_rest_is_used(self):
+        again = [{"block_id": "B2", "motivator_id": "M6"}, {"block_id": "B4", "motivator_id": "M6"}]
+        self.run_with(calls(("get_motivators", {})), calls(("submit_plan", {"rewards": again})), done())
+        answer = json.loads(body(self.net.requests[2])["messages"][-1]["content"])
+        self.assertEqual(answer["accepted_rewards"], 1)  # M1 to M5 are still unused
+        self.approvals = Approvals()  # only Bluey, Leo's own favorite, is left
+        self.profile = build_profile(self.leo, self.qloo, self.school.roster(), self.approvals)
+        only = [{"block_id": b, "motivator_id": "M1"} for b in ("B2", "B4", "B6")]
+        plan = self.run_with(calls(("get_motivators", {})), calls(("submit_plan", {"rewards": only})), done())
+        answer = json.loads(body(self.net.requests[2])["messages"][-1]["content"])
+        self.assertEqual(answer["accepted_rewards"], 3)
+        self.assertEqual([s.reward_item for s in plan["steps"] if s.reward_item], ["Bluey"] * 3)
+        tool = [m for m in body(self.net.requests[-1])["messages"] if m["role"] == "tool"][0]
+        self.assertTrue(json.loads(tool["content"])["approved"][0]["favorite"])
+
     def test_a_block_the_model_left_out_does_not_repeat_its_choice(self):
         # The rule plan puts Canticuenticos after B4; the model puts it after B2 and stops there.
         plan = self.run_with(calls(("get_motivators", {})),

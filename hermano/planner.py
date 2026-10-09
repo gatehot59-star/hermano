@@ -1,8 +1,8 @@
 """Agent planner: the language model chooses, the code decides what is allowed.
 
 The model works only with tools and the placeholder STUDENT_1. It can do two things:
-1. choose which adult-approved motivator follows each class or special block, never the same
-   one twice in a day;
+1. choose which adult-approved motivator follows each class or special block; a Qloo idea at
+   most once a day, the child's own favorites again only when every other one was used;
 2. suggest up to two new ideas from Qloo's list for an adult to approve, with one sentence why.
 Every choice is checked in code: a reward after recess, an idea nobody approved or a reason with
 a health word is refused, and the model is told why. The child only ever sees titles an adult
@@ -29,8 +29,8 @@ SYSTEM = ("You are Hermano's planner for one school day of one child, called STU
           "Never use or invent a name. First call get_day and get_motivators. Then call "
           "submit_plan once with: one approved motivator (an M id) for each class or special "
           "block, changing domain from one block to the next when you can and avoiding the "
-          "recently used ones; never the same motivator twice in one day (if there are fewer "
-          "motivators than blocks, leave the extra blocks out); never a reward after recess, "
+          "recently used ones; never the same motivator twice in one day, except the child's "
+          "favorites (favorite: true) once every other motivator is used; never a reward after recess, "
           "arrival or dismissal; and at most "
           "{n} new ideas from the candidates (C ids), each with one short sentence in {language} "
           "about why it fits the child's tastes. If submit_plan lists problems, fix them and "
@@ -82,6 +82,7 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
     c_ids = {f"C{i}": c for i, c in enumerate(candidates[:MAX_CANDIDATES], 1)}
     b_ids = {f"B{i}": i - 1 for i in range(1, len(blocks) + 1)}
     used = {(d, n) for d, n in recent}
+    favorites = {(c.domain, c.name) for c in profile.own}
     assigned: Dict[int, Candidate] = {}
     suggested: List[dict] = []
 
@@ -97,7 +98,8 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
 
     def get_motivators():
         return {"approved": [{"id": k, "domain": c.domain, "title": c.name,
-                              "recently_used": (c.domain, c.name) in used}
+                              "recently_used": (c.domain, c.name) in used,
+                              "favorite": (c.domain, c.name) in favorites}
                              for k, c in m_ids.items()],
                 "candidates": [{"id": k, "domain": c.domain, "title": c.name}
                                for k, c in c_ids.items()]}
@@ -114,9 +116,10 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
                 problems.append(f"{bid}: rewards only follow class or special blocks")
             elif mid not in m_ids:
                 problems.append(f"{bid}: {mid} is not an approved motivator")
-            elif any(m_ids[mid] is c for c in new_assigned.values()):
-                problems.append(f"{bid}: {mid} is already used today; choose another one or "
-                                "leave this block out")
+            elif any(m_ids[mid] is c for c in new_assigned.values()) and not (
+                    (m_ids[mid].domain, m_ids[mid].name) in favorites
+                    and all(any(c is a for a in new_assigned.values()) for c in m_ids.values())):
+                problems.append(f"{bid}: {mid} is already used today; choose another one")
             else:
                 new_assigned[i] = m_ids[mid]
         new_suggested: List[dict] = []
@@ -165,13 +168,15 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
     for i, c in assigned.items():
         _set_reward(plan["steps"][i], lang, c)
     # Blocks the model left out keep the rule-based reward, unless the model already gave that
-    # title today: then the next unused approved motivator, or the generic reward.
+    # Qloo idea today: then the next unused approved motivator, or else a favorite again.
     today = {(c.domain, c.name) for c in assigned.values()}
     for i, st in enumerate(plan["steps"]):
         if i in assigned or not st.reward_item:
             continue
-        if (st.reward_domain, st.reward_item) in today:
-            spare = next((c for c in approved if (c.domain, c.name) not in today), None)
+        key = (st.reward_domain, st.reward_item)
+        if key in today and key not in favorites:
+            spare = next((c for c in approved if (c.domain, c.name) not in today), None) or \
+                next((c for c in approved if (c.domain, c.name) in favorites), None)
             _set_reward(st, lang, spare)
         if st.reward_item:
             today.add((st.reward_domain, st.reward_item))
