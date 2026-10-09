@@ -67,6 +67,16 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(plan["planner"], "rules")
         self.assertEqual(plan["suggested"], [])
 
+    def test_the_childs_own_favorites_are_motivators_for_the_model_too(self):
+        # M6 is Bluey: Leo's own favorite, typed by an adult, after the five approved ideas.
+        plan = self.run_with(calls(("get_motivators", {})),
+                             calls(("submit_plan", {"rewards": [{"block_id": "B2", "motivator_id": "M6"}]})),
+                             done())
+        self.assertEqual(plan["planner"], "llm")
+        self.assertEqual(plan["steps"][1].reward_item, "Bluey")
+        tool = [m for m in body(self.net.requests[-1])["messages"] if m["role"] == "tool"][0]
+        self.assertIn("Bluey", [m["title"] for m in json.loads(tool["content"])["approved"]])
+
     def test_the_model_chooses_among_approved_ideas(self):
         plan = self.good_run()
         self.assertEqual(plan["planner"], "llm")

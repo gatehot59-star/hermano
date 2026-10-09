@@ -2,8 +2,9 @@
 
 The child picks a companion, hermano or hermana. Qloo turns the child's interests into related
 books, music, shows, games and movies, already filtered for the child's age. Each new idea
-waits for an adult's OK before the child sees it. Approved ideas become rewards after classes
-and calm-down options, and rotate so they stay fresh. At the end of the day the child says how
+waits for an adult's OK before the child sees it. The child's own favorites, which an adult
+typed, are rewards from day one; approved ideas join them after classes and as calm-down
+options, and they rotate so they stay fresh. At the end of the day the child says how
 each step went, and every adult linked to that child gets a different report. Hermano never
 diagnoses, and health words are scrubbed from every report.
 
@@ -16,12 +17,12 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from .approvals import APPROVED, PENDING, Approvals
+from .approvals import APPROVED, PENDING, REJECTED, Approvals
 from .guard import UnsafeText, scrub, validate_interest
 from .i18n import DEFAULT_LANG, pick, q, t
 from .models import BLOCK_KINDS, SUPPORT_KINDS, SUPPORTS, Adult, Block, School, Student, support_text
 from .qloo import QlooError, UnsupportedType
-from .ratings import content_ratings_for, game_allowed, load_game_ratings
+from .ratings import block_reason, content_ratings_for, load_game_ratings
 
 DOMAINS = ("book", "artist", "tv_show", "video_game", "movie")
 # Rewards come after effort: never after recess, arrival or dismissal.
@@ -43,7 +44,9 @@ class TasteProfile:
     student_id: str
     signals: List[str]
     by_domain: Dict[str, List[Candidate]]
-    blocked: List[Tuple[str, str]] = field(default_factory=list)  # rated above the child's age
+    blocked: List[Tuple[str, str]] = field(default_factory=list)  # kept out by the age gate
+    why_blocked: Dict[str, str] = field(default_factory=dict)  # "domain:name" -> reason
+    own: List[Candidate] = field(default_factory=list)  # the child's favorites, typed by an adult
     refused: List[str] = field(default_factory=list)  # why an interest was not sent; not the text
     degraded: str = ""
 
@@ -58,9 +61,24 @@ class TasteProfile:
         return out
 
 
-def _too_old_for(student: Student, domain: str, name: str, ratings: Dict[str, str]) -> bool:
-    """A game the team knows is rated above the child's age."""
-    return domain == "video_game" and game_allowed(ratings.get(name.casefold()), student.age) is False
+def _gate(profile: TasteProfile, student: Student, domain: str, item: dict, ratings: Dict[str, str],
+          typed_by_adult: bool = False) -> bool:
+    """True if the idea passes the age gate; otherwise it is recorded in profile.blocked."""
+    why = block_reason(domain, student.age, item.get("rating", ""), item.get("tags", ()),
+                       ratings.get(item["name"].casefold()), typed_by_adult)
+    if not why:
+        return True
+    profile.blocked.append((domain, item["name"]))
+    profile.why_blocked[f"{domain}:{item['name']}"] = why
+    return False
+
+
+def _lookup(qloo, name: str, kind: str) -> Optional[dict]:
+    find = getattr(qloo, "search_entity", None)
+    if find is not None:
+        return find(name, kind)
+    eid = qloo.search(name, kind)
+    return {"id": eid} if eid else None
 
 
 def build_profile(student: Student, qloo, roster=(), approvals: Optional[Approvals] = None,
@@ -68,26 +86,35 @@ def build_profile(student: Student, qloo, roster=(), approvals: Optional[Approva
     """Expand the child's interests across domains with Qloo, for the child's age.
 
     Only safe interest names and Qloo entity ids are sent: never the child's alias, id or
-    supports. If Qloo does not answer, the profile is empty and the day uses generic rewards;
-    if Qloo refuses one type (400), only that type is skipped.
+    supports. Every idea passes the age gate in ratings.py. The child's own interests in a
+    reward domain become profile.own once they pass the gate too. If Qloo does not answer, the
+    profile has no new ideas and the day uses the child's own favorites or generic rewards; if
+    Qloo refuses one type (400), only that type is skipped.
     """
     ratings = load_game_ratings() if game_ratings is None else game_ratings
     roster = list(roster) or [student.alias]
     profile = TasteProfile(student.id, [], {d: [] for d in DOMAINS})
     ids: List[str] = []
+    for it in student.interests:
+        try:
+            name = validate_interest(it.name, roster)
+            found = None if profile.degraded else _lookup(qloo, name, it.kind)
+        except UnsafeText as e:
+            profile.refused.append(e.reason)
+            continue
+        except QlooError as e:  # the child's own favorites do not need Qloo
+            profile.degraded = "Qloo " + (str(e.status) if e.status else "network")
+            found = None
+        profile.signals.append(name)
+        if found and found.get("id"):
+            ids.append(found["id"])
+        if it.kind in DOMAINS:
+            item = dict(found or {}, name=name)
+            if _gate(profile, student, it.kind, item, ratings, typed_by_adult=True):
+                profile.own.append(Candidate(it.kind, name, item.get("id", "")))
+    if not ids or profile.degraded:
+        return profile
     try:
-        for it in student.interests:
-            try:
-                name = validate_interest(it.name, roster)
-                eid = qloo.search(name, it.kind)
-            except UnsafeText as e:
-                profile.refused.append(e.reason)
-                continue
-            profile.signals.append(name)
-            if eid:
-                ids.append(eid)
-        if not ids:
-            return profile
         own = {i.name.casefold() for i in student.interests}
         exclude = approvals.excluded_ids(student.id) if approvals else []
         allowed = content_ratings_for(student.age)
@@ -103,8 +130,7 @@ def build_profile(student: Student, qloo, roster=(), approvals: Optional[Approva
             for x in items:
                 if x["name"].casefold() in own:
                     continue
-                if _too_old_for(student, d, x["name"], ratings):
-                    profile.blocked.append((d, x["name"]))
+                if not _gate(profile, student, d, x, ratings):
                     continue
                 profile.by_domain[d].append(Candidate(d, x["name"], x.get("id", "")))
     except QlooError as e:
@@ -152,12 +178,25 @@ def _approved(approvals: Approvals, sid: str, c: Candidate) -> bool:
     return approvals.status(sid, c.domain, c.name) == APPROVED
 
 
+def motivators(student: Student, profile: TasteProfile, approvals: Approvals) -> List[Candidate]:
+    """What may reach the child: Qloo ideas an adult approved, then the child's own favorites
+    (typed by an adult, already through the age gate). Nothing else."""
+    out = [c for c in profile.pool() if _approved(approvals, student.id, c)]
+    seen = {(c.domain, c.name.casefold()) for c in out}
+    for c in profile.own:
+        if (c.domain, c.name.casefold()) not in seen and \
+                approvals.status(student.id, c.domain, c.name) != REJECTED:
+            out.append(c)
+            seen.add((c.domain, c.name.casefold()))
+    return out
+
+
 def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotation: Rotation,
              approvals: Approvals, lang: str = DEFAULT_LANG) -> Dict:
     """One step per block: first/then cue, change warning, calm-down options, and a reward
-    after classes. Only ideas an adult approved reach the child."""
+    after classes. Only ideas an adult approved, and the child's own favorites, reach the child."""
     ideas = profile.pool()
-    pool = [c for c in ideas if _approved(approvals, student.id, c)]
+    pool = motivators(student, profile, approvals)
     pending = [c for c in ideas if approvals.status(student.id, c.domain, c.name) == PENDING]
     picks = [(c.domain, c.name) for c in pool]
     artists = [c.name for c in pool if c.domain == "artist"]

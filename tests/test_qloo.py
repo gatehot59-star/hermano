@@ -53,7 +53,25 @@ class TestHackathonRules(unittest.TestCase):
         self.assertNotIn("k-test", req.full_url)
         self.assertEqual(rec.params(), {"filter.type": ["urn:entity:book"],
                                         "signal.interests.entities": ["A,B"], "take": ["3"]})
-        self.assertEqual(out, [{"name": "Matilda", "kind": "book", "id": "E1"}])
+        self.assertEqual(out, [{"name": "Matilda", "kind": "book", "id": "E1", "rating": "", "tags": []}])
+
+    def test_insights_keeps_the_rating_and_the_tags_for_the_age_gate(self):
+        # Shape seen live 2026-10-08: games carry the ESRB rating in properties.content_rating.
+        game = {"name": "Genshin Impact", "entity_id": "E9", "properties": {"content_rating": "T"},
+                "tags": [{"id": "t1", "name": "Anime-style", "type": "urn:tag:style:qloo"}, {"id": "t2"}]}
+        rec = Recorder(lambda r: {"results": {"entities": [game, {"name": "Unrated", "entity_id": "E8",
+                                                                   "properties": {"content_rating": ""}}]}})
+        out = client(rec).insights("video_game", ["A"])
+        self.assertEqual(out[0]["rating"], "T")
+        self.assertEqual(out[0]["tags"], ["Anime-style"])
+        self.assertEqual(out[1]["rating"], "")
+
+    def test_search_entity_keeps_the_rating_too(self):
+        rec = Recorder(lambda r: {"results": [{"name": "Minecraft", "entity_id": "E-m",
+                                               "properties": {"content_rating": "E10+"}}]})
+        c = client(rec)
+        self.assertEqual(c.search_entity("Minecraft", "video_game"), {"id": "E-m", "rating": "E10+", "tags": []})
+        self.assertEqual(c.search("Minecraft", "video_game"), "E-m")
 
     def test_search_request_shape(self):
         rec = Recorder()
