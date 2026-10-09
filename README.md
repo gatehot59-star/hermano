@@ -14,13 +14,14 @@ Hermano works on that gap: the day-to-day follow-up, and the child's own voice.
 
 1. An adult enters what the child likes: a show, a game, a band, a sports star.
 2. **Qloo is the core.** Hermano looks each interest up with `/search` and asks `/v2/insights` for related books, artists, TV shows, video games and movies. Movies and shows are requested with `filter.content_rating` for the child's age, so Qloo itself keeps them age-appropriate.
-3. **Nothing new reaches the child without an adult's OK.** Qloo's ideas go first to the child's family or teacher. The ones they approve become the child's motivators; the ones they reject are left out of the next Qloo request with `filter.exclude.entities`. Games the team knows are rated above the child's age (ESRB) are never even proposed.
+3. **Nothing new reaches the child without an adult's OK.** Qloo's ideas go first to the child's family or teacher. The ones they approve become the child's motivators; the ones they reject are left out of the next Qloo request with `filter.exclude.entities`. The child's own favorites, which an adult entered, are rewards from day one.
+   **The age gate runs before any adult sees an idea**, and on the child's own favorites too: movies and shows must carry a rating for the child's age (checked again in code on Qloo's answer); games use the stricter of Qloo's ESRB rating and the team's table, and under 13 a game with no rating is not proposed; under 13, a new artist or book needs a Qloo tag for children or families (such as Childrens, Middle Grade or Family-Oriented).
 4. **The agent plans the day.** A language model (Qwen3.8-27B on Groq) reads the day and the ideas through tools, chooses which adult-approved idea follows each class, and suggests up to two new Qloo ideas for the adults, each with one sentence on why it fits. It only ever sees the placeholder STUDENT_1, the child's age, the blocks and the titles: no name, no supports. Hermano's rules check every choice (no reward after recess, nothing unapproved for the child) and tell the model what to fix. Without the model, the rule-based planner does the same job.
 5. For every block of the school day, Hermano prepares a first/then cue, a warning before each change and calm-down options. Rewards come only after classes, never after recess or at dismissal, and they rotate so they do not wear out.
 6. At the end of the day the child says how each step went, with faces.
 7. Each adult gets a different report, only about the children linked to them: practical notes and new ideas to approve for the teacher, an aggregate for the principal, plain language for the family, a structured log for the specialist.
 
-Without Qloo, every child would get the same generic routine: that is exactly what Hermano falls back to when Qloo does not answer.
+Without Qloo, each child would only get the two or three favorites an adult typed, over and over: that is what Hermano falls back to when Qloo does not answer.
 
 ## Privacy and safety by design
 
@@ -41,9 +42,11 @@ Third batch, same day: the agent planner, `hermano/planner.py`. The model gets t
 
 Fourth batch, same day: the web views, `hermano/web.py` (`python -m hermano serve`). The child's view is made for the phone: the day step by step, a heads-up before each change, calm-down options, and three faces to say how each step went. It shows only titles an adult approved, never Hermano's suggestions or their reasons. Each adult gets a page with their report; the family and the teacher also get the new ideas, with the agent's reason, and Yes and No buttons. No request calls the language model or Qloo: the day's plans are built once per day and language (the rule-based plan at once, the agent's plan in the background) and kept in a private cache, so visitors do not spend the free quota. Every visitor gets their own copy of the approvals and the check-ins, so judges do not change each other's demo. The pages carry no scripts. 119 tests.
 
-Not done yet, in this order: the hosted demo, and a test against the real Qloo API, which waits for the hackathon key.
+Fifth batch, same day: first runs against the real Qloo hackathon API. Video games are `urn:entity:videogame` (the documented `video_game` answers 400), and a type Qloo refuses is now skipped instead of emptying the whole profile. The real answers showed two holes, now closed by the age gate above: Genshin Impact (ESRB T) reached an 11-year-old, and an Australian rapper reached an 8-year-old. With real Qloo, the invented school's day now has real rewards: on the first day each child's own favorites, from the second day also the Qloo ideas the family approved. 133 tests.
 
-Known limits: titles without a US content rating (for example, local Argentine shows) are left out by the rating filter. The ESRB ratings for games are typed by the team. An interest that matches a child's name is refused even when it is also a real title. Suggested readings do not match the class topic yet.
+Not done yet: the hosted demo.
+
+Known limits: titles without a US content rating (for example, local Argentine shows) are left out by the rating filter. Some of Qloo's book and artist entries have no tags at all, so under 13 they are left out even when they are for children (seen: the first Harry Potter book, Canticuénticos). TV-PG still lets through shows written for teenagers. The ESRB ratings in the team's table may be wrong; the stricter rating wins. An interest that matches a child's name is refused even when it is also a real title. Suggested readings do not match the class topic yet.
 
 ## Run it
 
@@ -69,7 +72,7 @@ On a host, run `python -m hermano serve --host 0.0.0.0` (or set `HOST` and `PORT
 
 ## Public demo on Render
 
-`render.yaml` is a Render Blueprint for one free web service: `pip install .`, then `python -m hermano serve --host 0.0.0.0` on the port Render gives, a health check on `/healthz`, and Python 3.12 (`.python-version`). Render asks for `GROQ_API_KEY` when the Blueprint is created; the value never goes into the repository. A free service sleeps after 15 minutes without visitors and takes about a minute to wake up, and its disk is not kept. So after waking up Hermano serves the rule-based plan at once, plans with the agent in the background, and the home page reloads itself every 20 seconds until the agent is done.
+`render.yaml` is a Render Blueprint for one free web service: `pip install .`, then `python -m hermano serve --host 0.0.0.0` on the port Render gives, a health check on `/healthz`, and Python 3.12 (`.python-version`). Render asks for `GROQ_API_KEY` and `QLOO_API_KEY` when the Blueprint is created; the values never go into the repository. A free service sleeps after 15 minutes without visitors and takes about a minute to wake up, and its disk is not kept. So after waking up Hermano serves the rule-based plan at once, plans with the agent in the background, and the home page reloads itself every 20 seconds until the agent is done.
 
 ## Credits
 

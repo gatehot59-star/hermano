@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from hermano.__main__ import main
-from hermano.agent import WORK_KINDS, Rotation, build_profile, plan_day, report_for, run_day
+from hermano.agent import WORK_KINDS, Rotation, build_profile, motivators, plan_day, report_for, run_day
 from hermano.approvals import APPROVED, PENDING, REJECTED, Approvals
 from hermano.guard import contains_health
 from hermano.i18n import TEXT, q, t
@@ -195,8 +195,9 @@ class TestSafety(Base):
             records, profiles = self.day(lang)
             for sid, rec in records.items():
                 steps = rec["plan"]["steps"]
+                own = {(c.domain, c.name) for c in profiles[sid].own}
                 for s in steps:
-                    if s.reward_item:
+                    if s.reward_item and (s.reward_domain, s.reward_item) not in own:
                         self.assertEqual(self.approvals.status(sid, s.reward_domain, s.reward_item), APPROVED)
                 child = " ".join(s.first_then + " " + " ".join(s.calm) for s in steps)
                 pending = [c for c in profiles[sid].pool() if self.approvals.status(sid, c.domain, c.name) == PENDING]
@@ -258,6 +259,115 @@ class TestSafety(Base):
         self.assertIn("One Piece", shows)  # TV-14 in the mock
 
 
+def ideas_reply(by_kind, search=None):
+    """A fake Qloo: /search finds every interest; insights answers by_kind[kind] (entity dicts)."""
+    def reply(req):
+        url = req.full_url
+        if "/search" in url:
+            name = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["query"][0]
+            return {"results": [dict({"name": name, "entity_id": "E-" + name}, **(search or {}).get(name, {}))]}
+        kind = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["filter.type"][0].rsplit(":", 1)[1]
+        return {"results": {"entities": by_kind.get(kind, [])}}
+    return reply
+
+
+def ent(name, rating="", *tags):
+    return {"name": name, "entity_id": "E-" + name, "properties": {"content_rating": rating},
+            "tags": [{"name": t, "type": "urn:tag:genre"} for t in tags]}
+
+
+class TestAgeGate(Base):
+    """The age gate with answers shaped like the ones seen live on 2026-10-08."""
+
+    def profile(self, sid, by_kind, ratings=None, search=None):
+        st = self.school.students[sid]
+        return build_profile(st, real_client(Recorder(ideas_reply(by_kind, search))), self.school.roster(),
+                             self.approvals, game_ratings=ratings or {})
+
+    def names(self, prof, domain):
+        return [c.name for c in prof.by_domain[domain]]
+
+    def test_qloos_game_rating_blocks_games_above_the_childs_age(self):
+        games = {"videogame": [ent("Genshin Impact", "T"), ent("Stardew Valley", "E10+"), ent("Goat Simulator", "M")]}
+        sofi = self.profile("s2", games)  # 11: Genshin Impact reached her plan live on 2026-10-08
+        self.assertEqual(self.names(sofi, "video_game"), ["Stardew Valley"])
+        self.assertEqual(sofi.why_blocked["video_game:Genshin Impact"], "rating")
+        mati = self.profile("s3", games)  # 14
+        self.assertEqual(self.names(mati, "video_game"), ["Genshin Impact", "Stardew Valley"])
+
+    def test_unrated_games_are_not_proposed_under_13(self):
+        games = {"videogame": [ent("Grim Dawn"), ent("Among Us", "E10+")]}
+        sofi = self.profile("s2", games)
+        self.assertEqual(self.names(sofi, "video_game"), ["Among Us"])
+        self.assertEqual(sofi.why_blocked["video_game:Grim Dawn"], "unrated")
+        self.assertIn("Grim Dawn", self.names(self.profile("s3", games), "video_game"))  # 14: an adult decides
+
+    def test_the_stricter_of_qloo_and_the_team_table_wins(self):
+        games = {"videogame": [ent("ROBLOX", "E10+")]}
+        self.assertEqual(self.names(self.profile("s2", games, {"roblox": "T"}), "video_game"), [])
+        self.assertEqual(self.names(self.profile("s2", {"videogame": [ent("ROBLOX", "T")]}, {"roblox": "E10+"}),
+                                    "video_game"), [])
+        self.assertEqual(self.names(self.profile("s2", games, {}), "video_game"), ["ROBLOX"])
+
+    def test_music_and_books_under_13_need_a_childrens_tag(self):
+        # Live 2026-10-08: ChillinIT reached Leo (8); Raffi carries Family-Oriented, ChillinIT does not.
+        ideas = {"artist": [ent("ChillinIT", "", "Rap", "Youthful"), ent("Raffi", "", "Childrens", "Family-Oriented")],
+                 "book": [ent("No Tags"), ent("Elmer", "", "Picture Books"), ent("Teen Novel", "", "Young Adult")]}
+        leo = self.profile("s1", ideas)
+        self.assertEqual(self.names(leo, "artist"), ["Raffi"])
+        self.assertEqual(self.names(leo, "book"), ["Elmer"])
+        self.assertEqual(leo.why_blocked["artist:ChillinIT"], "not_for_children")
+        mati = self.profile("s3", ideas)  # 14: they go to an adult for approval
+        self.assertEqual(self.names(mati, "artist"), ["ChillinIT", "Raffi"])
+        self.assertEqual(self.names(mati, "book"), ["No Tags", "Elmer", "Teen Novel"])
+
+    def test_adult_tags_keep_a_book_away_from_every_child(self):
+        mati = self.profile("s3", {"book": [ent("Grown Up", "", "Erotica")]})
+        self.assertEqual(self.names(mati, "book"), [])
+
+    def test_a_movie_outside_the_childs_ratings_is_dropped_even_if_qloo_sends_it(self):
+        ideas = {"movie": [ent("Toy Story 4", "G"), ent("Grown Up Film", "R"), ent("One Day")],
+                 "tv_show": [ent("Skins", "TV-MA"), ent("Arthur", "TV-Y")]}
+        leo = self.profile("s1", ideas)
+        self.assertEqual(self.names(leo, "movie"), ["Toy Story 4"])
+        self.assertEqual(self.names(leo, "tv_show"), ["Arthur"])
+        self.assertEqual(leo.why_blocked["movie:One Day"], "unrated")
+
+
+class TestOwnFavorites(Base):
+    def test_the_childs_own_favorites_are_rewards_from_day_one(self):
+        records, profiles = run_day(self.school, self.qloo, Rotation(), Approvals(), 0)
+        sofi = [s.reward_item for s in records["s2"]["plan"]["steps"] if s.reward_item]
+        self.assertTrue(sofi)
+        self.assertTrue(set(sofi) <= {"Tini", "Harry Potter"})
+        self.assertIn("Tini", " ".join(c for s in records["s2"]["plan"]["steps"] for c in s.calm))
+
+    def test_own_favorites_pass_the_age_gate_too(self):
+        leo = build_profile(self.school.students["s1"], self.qloo, self.school.roster(), self.approvals)
+        self.assertIn(("tv_show", "Bluey"), [(c.domain, c.name) for c in leo.own])
+        self.assertNotIn("Minecraft", [c.name for c in leo.own])  # E10+ and Leo is 8
+        self.assertIn("Minecraft", leo.signals)  # still used to understand his taste
+        rated = self.profile_with_search("s1", {"Bluey": {"properties": {"content_rating": "TV-MA"}}})
+        self.assertNotIn("Bluey", [c.name for c in rated.own])
+
+    def profile_with_search(self, sid, search):
+        st = self.school.students[sid]
+        return build_profile(st, real_client(Recorder(ideas_reply({}, search))), self.school.roster(),
+                             self.approvals, game_ratings={})
+
+    def test_a_rejected_favorite_stops_being_a_reward(self):
+        self.approvals.decide(self.school.adults["a6"], "s2", "artist", "Tini", False)
+        prof = build_profile(self.school.students["s2"], self.qloo, self.school.roster(), self.approvals)
+        self.assertNotIn("Tini", [c.name for c in motivators(self.school.students["s2"], prof, self.approvals)])
+
+    def test_with_qloo_down_the_favorites_still_reward(self):
+        rec = Recorder(lambda r: http_error(r.full_url, 429))
+        prof = build_profile(self.school.students["s2"], real_client(rec), self.school.roster(), self.approvals)
+        self.assertTrue(prof.degraded)
+        self.assertEqual(len(rec.requests), 3)  # one search and its retries, then Hermano stops asking
+        self.assertEqual([c.name for c in prof.own], ["Tini", "Harry Potter"])
+
+
 class TestRobustness(Base):
     def test_a_type_qloo_refuses_is_skipped_not_the_whole_day(self):
         # Seen live 2026-10-08: one refused type (400) used to empty the whole profile.
@@ -269,7 +379,9 @@ class TestRobustness(Base):
                 kind = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["filter.type"][0].rsplit(":", 1)[1]
                 if kind == "book":
                     return http_error(url, code)
-                return {"results": {"entities": [{"name": "Idea " + kind, "entity_id": "E-" + kind}]}}
+                return {"results": {"entities": [{"name": "Idea " + kind, "entity_id": "E-" + kind,
+                                                   "properties": {"content_rating": "G" if kind == "movie" else "TV-Y"},
+                                                   "tags": [{"name": "Family-Oriented"}]}]}}
             return reply
         leo = self.school.students["s1"]
         prof = build_profile(leo, real_client(Recorder(reply_with(400))), self.school.roster(), self.approvals)
@@ -280,14 +392,19 @@ class TestRobustness(Base):
         bad_key = build_profile(leo, real_client(Recorder(reply_with(401))), self.school.roster(), self.approvals)
         self.assertEqual(bad_key.degraded, "Qloo 401")
 
-    def test_qloo_down_means_a_generic_plan_not_a_crash(self):
+    def test_qloo_down_means_a_plan_with_the_childs_favorites_not_a_crash(self):
         rec = Recorder(lambda r: http_error(r.full_url, 429))
         records, profiles = run_day(self.school, real_client(rec), Rotation(), self.approvals)
         for sid, rec_ in records.items():
             self.assertTrue(profiles[sid].degraded)
+            own = {c.name for c in profiles[sid].own}
             for s in rec_["plan"]["steps"]:
                 if s.block.kind in WORK_KINDS:
-                    self.assertEqual(s.reward, t("en", "reward.default"))
+                    self.assertTrue(s.reward_item in own if s.reward_item else
+                                    s.reward == t("en", "reward.default"), (sid, s.reward))
+        self.assertEqual({c.name for c in profiles["s1"].own}, {"Bluey"})  # Minecraft is E10+
+        self.assertEqual({c.name for c in profiles["s3"].own}, {"Dragon Ball"})  # Messi is a person
+        self.assertEqual(records["s3"]["plan"]["steps"][1].reward_item, "Dragon Ball")
 
 
 class TestLanguages(unittest.TestCase):
