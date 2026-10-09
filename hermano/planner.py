@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional
 
-from .agent import WORK_KINDS, Candidate, Rotation, TasteProfile, _show, motivators, plan_day
+from .agent import (WORK_KINDS, Candidate, Rotation, TasteProfile, _show, motivators, plan_day,
+                    set_reinforcements)
 from .approvals import PENDING, Approvals
 from .guard import Pseudonymizer, UnsafeText, contains_contact, contains_health
 from .i18n import DEFAULT_LANG, LANGS, pick, t
@@ -183,6 +184,8 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
     # Rotation remembers what the child actually got today.
     rotation.used[student.id] = recent + [(s.reward_domain, s.reward_item)
                                           for s in plan["steps"] if s.reward_item]
+    # The teacher's reinforcement ideas follow the rewards the model chose.
+    set_reinforcements(plan, motivators(student, profile, approvals), lang)
     plan["suggested"] = [{"candidate": s["candidate"], "reason": pseudo.unmask(s["reason"])}
                          for s in suggested]
     plan["planner"] = "llm"

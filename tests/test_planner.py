@@ -62,6 +62,17 @@ class PlannerTest(unittest.TestCase):
                                  {"candidate_id": "C3", "reason": REASON}]})),
                              done(), **kw)
 
+    def test_the_reinforcement_idea_follows_the_models_rewards(self):
+        rules = plan_day(self.leo, self.blocks, self.profile, Rotation(), self.approvals)
+        self.assertIn("Canticu\u00e9nticos", rules["steps"][1].reinforce)  # Language, rule plan
+        plan = self.run_with(calls(("get_motivators", {})),
+                             calls(("submit_plan", {"rewards": [{"block_id": "B2", "motivator_id": "M2"}]})),
+                             done())
+        self.assertEqual(plan["planner"], "llm")
+        self.assertEqual(plan["steps"][1].reward_item, "Canticu\u00e9nticos")
+        self.assertNotIn("Canticu\u00e9nticos", plan["steps"][1].reinforce)
+        self.assertTrue(plan["steps"][1].reinforce)
+
     def test_without_a_model_the_rule_plan_runs(self):
         plan = llm_plan_day(self.leo, self.blocks, self.profile, Rotation(), self.approvals)
         self.assertEqual(plan["planner"], "rules")

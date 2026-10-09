@@ -30,6 +30,8 @@ WORK_KINDS = ("class", "special")
 # Movement breaks happen inside classes, and only for children whose adults agreed the support.
 MOVEMENT_SUPPORT = "movement_break"
 GENERIC_MOVES = ("move.stretch", "move.march", "move.errand")
+# Agreed supports that change how a reinforcement activity is given to the child.
+REINFORCE_ADAPT = ("one_instruction", "split_tasks")
 FACES = ("bien", "mas_o_menos", "dificil")
 FACE_ICON = {"bien": "\U0001F600", "mas_o_menos": "\U0001F610", "dificil": "\U0001F61F"}
 
@@ -176,6 +178,7 @@ class Step:
     reward: str = ""
     reading: str = ""
     movement: str = ""
+    reinforce: str = ""  # for the teacher only, never shown to the child
 
 
 def _show(lang: str, domain: str, name: str) -> str:
@@ -207,6 +210,37 @@ def movement_options(lang: str, pool: List[Candidate]) -> List[str]:
     out += [t(lang, "move.like", x=q(lang, c.name)) for c in pool
             if c.domain in ("tv_show", "movie", "video_game")]
     return out + [t(lang, k) for k in GENERIC_MOVES]
+
+
+def reinforcement(lang: str, block: Block, pool: List[Candidate], avoid: str, supports: List[str],
+                  used=()) -> Tuple[str, str]:
+    """A reinforcement activity for the teacher, built on the class topic and one of the
+    child's approved tastes: one not used yet today, and not the reward of that class when
+    there is another. With no taste left, a drawing activity. Adapted to the agreed supports.
+    Returns (text, the title used or "")."""
+    activity = block.name(lang)
+    topic = block.topic_name(lang) or activity
+    fresh = [c for c in pool if c.name not in used]
+    c = next((x for x in fresh if x.name != avoid), None) or (fresh[0] if fresh else None)
+    if c is not None:
+        idea = t(lang, "reinforce." + c.domain, topic=topic, x=_show(lang, c.domain, c.name))
+    else:
+        idea = t(lang, "reinforce.default", topic=topic)
+    for code in REINFORCE_ADAPT:
+        if code in supports:
+            idea += t(lang, "reinforce." + code)
+    return t(lang, "reinforce.line", activity=activity, topic=topic, idea=idea), (c.name if c else "")
+
+
+def set_reinforcements(plan: Dict, pool: List[Candidate], lang: str) -> None:
+    """One reinforcement activity per class, after the rewards are final (rules or agent)."""
+    used: List[str] = []
+    for s in plan["steps"]:
+        if s.block.kind == "class":
+            s.reinforce, name = reinforcement(lang, s.block, pool, s.reward_item,
+                                              plan["student"].supports, used)
+            if name:
+                used.append(name)
 
 
 def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotation: Rotation,
@@ -257,8 +291,10 @@ def plan_day(student: Student, blocks: List[Block], profile: TasteProfile, rotat
             move_i += 1
         steps.append(Step(b, activity, t(lang, "first_then", activity=activity, then=then),
                           warning, calm, dom, item, reward, reading, movement))
-    return {"student": student, "lang": lang, "greeting": t(lang, "greeting." + student.persona),
+    plan = {"student": student, "lang": lang, "greeting": t(lang, "greeting." + student.persona),
             "steps": steps, "pending": pending}
+    set_reinforcements(plan, pool, lang)
+    return plan
 
 
 @dataclass
@@ -334,6 +370,7 @@ def _teacher(adult: Adult, school: School, records: Dict, sids: List[str], lang:
         moves = [f"{s.activity}: {s.movement.split(': ', 1)[-1]}" for s, c in pairs if s.movement]
         if moves:
             out.append(t(lang, "teacher.movement", items="; ".join(moves)))
+        out.extend(s.reinforce for s, c in pairs if s.reinforce)
         line = _pending_line(lang, "pending.teacher", records, sid)
         if line:
             out.append(line)

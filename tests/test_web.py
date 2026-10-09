@@ -140,6 +140,19 @@ class TestPages(WebCase):
         _, _, leo = Browser(app).get("/child/s1")
         self.assertNotIn("class='move'", leo)
 
+    def test_the_reinforcement_ideas_go_to_the_teacher_page_never_to_the_child(self):
+        app = self.app()
+        ideas = [s.reinforce for s in self.plan(app, "s1")["steps"] if s.reinforce]
+        self.assertTrue(ideas)
+        b = Browser(app)
+        teacher, child, family = b.get("/adult/a1")[2], b.get("/child/s1")[2], b.get("/adult/a5")[2]
+        for idea in ideas:
+            self.assertIn(esc(idea), teacher)
+            self.assertNotIn(esc(idea), child)
+            self.assertNotIn(esc(idea), family)
+        again = self.plan(self.app(), "s1")  # a new app reads the plans from the cache
+        self.assertEqual([s.reinforce for s in again["steps"]], [s.reinforce for s in self.plan(app, "s1")["steps"]])
+
     def test_family_and_teacher_see_the_agents_suggestion_with_its_reason(self):
         app = self.app(("rules", Planner(suggest=True)))
         b = Browser(app)

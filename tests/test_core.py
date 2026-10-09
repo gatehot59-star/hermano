@@ -440,6 +440,76 @@ class TestMovement(Base):
             self.assertFalse(contains_health(teacher + therapist))
 
 
+class TestReinforcement(Base):
+    """Reinforcement activities for the teacher, built on the class topic and the child's tastes."""
+
+    def ideas(self, plan):
+        return [s.reinforce for s in plan["steps"] if s.reinforce]
+
+    def test_every_class_gets_one_and_nothing_else_does(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            for sid, rec in records.items():
+                for s in rec["plan"]["steps"]:
+                    self.assertEqual(bool(s.reinforce), s.block.kind == "class", (sid, s.activity))
+                    if s.reinforce:
+                        self.assertIn(s.block.topic_name(lang), s.reinforce)
+
+    def test_only_approved_or_favorite_titles_and_a_different_one_each_class(self):
+        records, profiles = self.day()
+        for sid, rec in records.items():
+            st = self.school.students[sid]
+            allowed = [c.name for c in motivators(st, profiles[sid], self.approvals)]
+            ideas = self.ideas(rec["plan"])
+            used = [[n for n in allowed if word_in(n, idea)] for idea in ideas]
+            self.assertTrue(all(len(u) == 1 for u in used), (sid, ideas))
+            self.assertEqual(len({u[0] for u in used}), len(used), sid)
+            for c in rec["plan"]["pending"]:
+                self.assertFalse(any(word_in(c.name, idea) for idea in ideas), (sid, c.name))
+
+    def test_it_is_not_the_reward_of_the_same_class(self):
+        records, _ = self.day()
+        for sid, rec in records.items():
+            for s in rec["plan"]["steps"]:
+                if s.reinforce and s.reward_item:
+                    self.assertFalse(word_in(s.reward_item, s.reinforce), (sid, s.activity))
+
+    def test_it_follows_the_agreed_supports(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            leo, sofi, mati = (self.ideas(records[s]["plan"]) for s in ("s1", "s2", "s3"))
+            one, split = t(lang, "reinforce.one_instruction"), t(lang, "reinforce.split_tasks")
+            self.assertTrue(all(i.endswith(one) for i in leo))  # one instruction at a time
+            self.assertTrue(all(i.endswith(split) for i in sofi))  # long tasks split into parts
+            self.assertFalse(any(one in i or split in i for i in mati))
+
+    def test_without_tastes_it_is_a_drawing_on_the_topic(self):
+        st = Student(id="x", alias="Nadie", age=9, grade="4", persona="hermana", supports=[], interests=[])
+        prof = build_profile(st, self.qloo, ["Nadie"], Approvals())
+        plan = plan_day(st, self.school.schedules["s1"], prof, Rotation(), Approvals(), "es")
+        self.assertEqual(self.ideas(plan)[0], t("es", "reinforce.line", activity="Lengua", topic="los animales",
+                                                idea=t("es", "reinforce.default", topic="los animales")))
+
+    def test_with_one_taste_the_next_class_gets_a_drawing_not_the_same_idea(self):
+        # Real Qloo, 2026-10-09: Leo had only Bluey on day 1 and both classes got the same idea.
+        st = Student(id="x", alias="Nadie", age=8, grade="3", persona="hermano", supports=[],
+                     interests=[Interest("Bluey", "tv_show")])
+        prof = build_profile(st, self.qloo, ["Nadie"], Approvals())
+        ideas = self.ideas(plan_day(st, self.school.schedules["s1"], prof, Rotation(), Approvals()))
+        self.assertIn(q("en", "Bluey"), ideas[0])
+        self.assertEqual(ideas[1], t("en", "reinforce.line", activity="Math", topic="addition",
+                                     idea=t("en", "reinforce.default", topic="addition")))
+
+    def test_only_the_childs_teacher_reads_it(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            leo = self.ideas(records["s1"]["plan"])
+            for idea in leo:
+                self.assertIn(idea, self.report("a1", records, lang))
+            for aid in ("a2", "a4", "a5", "a8"):  # another teacher, principal, family, specialist
+                self.assertFalse(any(idea in self.report(aid, records, lang) for idea in leo), aid)
+
+
 class TestOwnFavorites(Base):
     def test_the_childs_own_favorites_are_rewards_from_day_one(self):
         records, profiles = run_day(self.school, self.qloo, Rotation(), Approvals(), 0)

@@ -108,7 +108,7 @@ def dump_records(records: Dict) -> Dict:
             "steps": [{"activity": s.activity, "first_then": s.first_then, "warning": s.warning,
                        "calm": list(s.calm), "reward_domain": s.reward_domain,
                        "reward_item": s.reward_item, "reward": s.reward, "reading": s.reading,
-                       "movement": s.movement}
+                       "movement": s.movement, "reinforce": s.reinforce}
                       for s in p["steps"]],
             "pending": [_cand(c) for c in p["pending"]],
             "suggested": [{"candidate": _cand(x["candidate"]), "reason": x["reason"]}
@@ -127,7 +127,7 @@ def load_records(school: School, data: Dict, lang: str) -> Dict:
             raise ValueError("cached plan does not match the schedule")
         steps = [Step(b, s["activity"], s["first_then"], s["warning"], list(s["calm"]),
                       s["reward_domain"], s["reward_item"], s["reward"], s["reading"],
-                      s.get("movement", ""))
+                      s.get("movement", ""), s.get("reinforce", ""))
                  for b, s in zip(blocks, d["steps"])]
         plan = {"student": school.students[sid], "lang": lang, "greeting": d["greeting"],
                 "steps": steps, "pending": [_uncand(c) for c in d["pending"]],
