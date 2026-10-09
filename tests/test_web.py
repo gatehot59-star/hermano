@@ -12,8 +12,8 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from hermano.agent import _show, demo_checkins, plan_day
-from hermano.i18n import t
+from hermano.agent import _show, calm_steps, demo_checkins, plan_day
+from hermano.i18n import q, t
 from hermano.models import SUPPORTS, exercise_text, load_school
 from hermano.qloo import make_client
 from hermano.web import CSP, SESSION_COOKIE, SESSION_TTL, App, esc, make_app, make_server
@@ -176,6 +176,34 @@ class TestPages(WebCase):
         self.assertEqual(b.post("/child/s1/checkin", step=i, did="maybe")[0], 400)
         again = self.plan(self.app(), "s1")  # a new app reads the plans from the cache
         self.assertEqual([s.exercise for s in again["steps"]], [s.exercise for s in steps])
+
+    def test_the_child_says_i_feel_nervous_and_the_teacher_reads_it(self):
+        app = self.app()
+        steps = self.plan(app, "s1")["steps"]
+        b = Browser(app)
+        child = b.get("/child/s1")[2]
+        self.assertEqual(child.count("name='nervous' value='1'"), len(steps))  # on every step
+        self.assertNotIn("class='calmbox'", child)
+        status, headers, _ = b.post("/child/s1/checkin", step=0, nervous=1)
+        self.assertEqual(status, 303)
+        self.assertIn(("Location", "/child/s1?lang=en#c0"), headers)
+        child = b.get("/child/s1")[2]
+        self.assertIn(esc(t("en", "nervous.flash")), child)
+        self.assertEqual(child.count("class='calmbox'"), 1)
+        for x in calm_steps(self.school.students["s1"], steps[0], "en"):
+            self.assertIn(f"<li>{esc(x)}</li>", child)
+        button = q("en", t("en", "nervous.button"))
+        invented = [c.activity for c in demo_checkins(self.school.students["s1"], self.plan(app, "s1"), 0) if c.nervous]
+        both = esc(t("en", "teacher.nervous", button=button, items="; ".join([steps[0].activity] + invented)))
+        self.assertIn(both, b.get("/adult/a1")[2])
+        self.assertNotIn(both, Browser(app).get("/adult/a1")[2])  # another visitor
+        b.post("/child/s1/checkin", step=1, face="bien")  # the child's own face replaces the invented one
+        teacher = b.get("/adult/a1")[2]
+        self.assertNotIn(both, teacher)
+        self.assertIn(esc(t("en", "teacher.nervous", button=button, items=steps[0].activity)), teacher)
+        self.assertEqual(b.post("/child/s1/checkin", step=0, nervous=2)[0], 400)
+        b.post("/reset")
+        self.assertNotIn("class='calmbox'", b.get("/child/s1")[2])
 
     def test_family_and_teacher_see_the_agents_suggestion_with_its_reason(self):
         app = self.app(("rules", Planner(suggest=True)))

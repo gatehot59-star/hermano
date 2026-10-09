@@ -28,7 +28,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
 from .agent import (FACE_ICON, FACES, Candidate, CheckIn, Rotation, Step, _show, build_profile,
-                    demo_checkins, plan_day, report_for, run_day)
+                    calm_steps, demo_checkins, plan_day, report_for, run_day)
 from .approvals import PENDING, Approvals
 from .i18n import DEFAULT_LANG, LANGS, pick, t
 from .llm import make_llm
@@ -74,6 +74,8 @@ main{max-width:46rem;margin:0 auto;padding:1rem}
 .ex{background:#eef3fb;border-radius:.75rem;padding:.5rem .75rem;margin:.5rem 0}
 .did button{font-size:1rem;border:2px solid #d9d4c7;background:#fff;border-radius:.75rem;padding:.25rem .6rem;margin:.2rem .3rem .2rem 0}
 .did button.picked{border-color:var(--accent);background:#e6f2ee}
+.sos button{font-size:1rem;border:2px solid #9db4d6;background:#eef3fb;border-radius:.75rem;padding:.3rem .8rem;margin:.4rem 0}
+.calmbox{background:#eef3fb;border-left:4px solid #5b7fb3;border-radius:.5rem;padding:.5rem .75rem;margin:.5rem 0}
 ul.plain{list-style:none;padding:0}
 footer{max-width:46rem;margin:2rem auto;padding:0 1rem;color:var(--muted);font-size:.9rem}
 """
@@ -155,6 +157,7 @@ class Session:
         self.approvals = Approvals(json.loads(json.dumps(approvals_raw)))
         self.faces: Dict[str, Dict[int, str]] = {}
         self.did: Dict[str, Dict[int, bool]] = {}  # the child's own answer about each exercise
+        self.nervous: Dict[str, set] = {}  # steps where the child pressed "I feel nervous"
         self.flash = ""
 
 
@@ -338,6 +341,8 @@ class App:
                         for i, c in enumerate(invented)]
             did = session.did.get(sid, {})
             checkins = [replace(c, exercise_done=did[i]) if i in did else c for i, c in enumerate(checkins)]
+            calm = session.nervous.get(sid, set())
+            checkins = [replace(c, nervous=True) if i in calm else c for i, c in enumerate(checkins)]
             out[sid] = {"plan": plan, "checkins": checkins, "told": len(told)}
         return out
 
@@ -469,6 +474,7 @@ class App:
         plan = self.plans(lang)["records"][sid]["plan"]
         told = session.faces.get(sid, {})
         did = session.did.get(sid, {})
+        nervous = session.nervous.get(sid, set())
         parts = [self._flash(session), f"<h1 class='hello'>{esc(plan['greeting'])}</h1>",
                  f"<p class='note'>{esc(t(lang, 'web.only_approved'))}</p>"]
         for i, s in enumerate(plan["steps"]):
@@ -491,10 +497,18 @@ class App:
                       f"<form class='did' method='post' action='/child/{esc(sid)}/checkin'>"
                       f"<input type='hidden' name='lang' value='{lang}'><input type='hidden' name='step' value='{i}'>"
                       f"<span>{esc(t(lang, 'web.did'))}</span> {picks}</form></div>")
+            box = ""
+            if i in nervous:
+                items = "".join(f"<li>{esc(x)}</li>" for x in calm_steps(plan["student"], s, lang))
+                box = (f"<div class='calmbox' id='c{i}' role='status'><p><strong>{esc(t(lang, 'nervous.title'))}</strong></p>"
+                       f"<ol>{items}</ol></div>")
+            sos = (f"{box}<form class='sos' method='post' action='/child/{esc(sid)}/checkin'>"
+                   f"<input type='hidden' name='lang' value='{lang}'><input type='hidden' name='step' value='{i}'>"
+                   f"<button type='submit' name='nervous' value='1'>\U0001F499 {esc(t(lang, 'nervous.button'))}</button></form>")
             parts.append(
                 f"<section class='step kind-{esc(b.kind)}' id='s{i}'><p class='time'>{esc(b.start)}-{esc(b.end)}</p>"
                 f"<p class='ft'>{esc(s.first_then)}</p>{warn}{move}{ex}"
-                f"<details><summary>{esc(t(lang, 'web.calm'))}</summary><ul>{calm}</ul></details>"
+                f"<details><summary>{esc(t(lang, 'web.calm'))}</summary><ul>{calm}</ul></details>{sos}"
                 f"<form class='faces' method='post' action='/child/{esc(sid)}/checkin'>"
                 f"<input type='hidden' name='lang' value='{lang}'><input type='hidden' name='step' value='{i}'>"
                 f"<span>{esc(t(lang, 'web.how'))}</span> {buttons}</form></section>")
@@ -507,6 +521,14 @@ class App:
         if not (raw.isascii() and raw.isdigit() and len(raw) < 4) or int(raw) >= len(steps):
             return self._message(400, lang, "web.bad_request", f"/child/{sid}")
         i = int(raw)
+        nervous = _one(form, "nervous")
+        if nervous:  # the child pressed "I feel nervous" on this step
+            if nervous != "1":
+                return self._message(400, lang, "web.bad_request", f"/child/{sid}")
+            with self.lock:
+                session.nervous.setdefault(sid, set()).add(i)
+                session.flash = t(lang, "nervous.flash")
+            return self._redirect(f"/child/{sid}?lang={lang}#c{i}")
         if did:  # the child's answer about the exercise of this step
             if did not in ("yes", "no") or not steps[i].exercise:
                 return self._message(400, lang, "web.bad_request", f"/child/{sid}")

@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from hermano.__main__ import main
-from hermano.agent import WORK_KINDS, Rotation, build_profile, motivators, plan_day, report_for, run_day
+from hermano.agent import WORK_KINDS, Rotation, build_profile, calm_steps, motivators, plan_day, report_for, run_day
 from hermano.approvals import APPROVED, PENDING, REJECTED, Approvals
 from hermano.guard import contains_health
 from hermano.i18n import TEXT, q, t
@@ -584,6 +584,48 @@ class TestExercises(Base):
                 self.assertIn(x, family)
             self.assertFalse(any(exercise_text(c, lang) in principal for c in EXERCISES))
             self.assertFalse(any(x in self.report("a2", records, lang) for x in texts))  # another teacher
+
+
+class TestNervous(Base):
+    """The child's "I feel nervous" button: calm steps from the child's own day, and who reads it."""
+
+    def test_the_calm_steps_use_the_specialists_exercise_and_the_childs_own_music(self):
+        for lang in ("en", "es"):
+            records, profiles = self.day(lang)
+            leo, mati = self.school.students["s1"], self.school.students["s3"]
+            artists = [c.name for c in motivators(leo, profiles["s1"], self.approvals) if c.domain == "artist"]
+            self.assertTrue(artists)
+            body, music, told = calm_steps(leo, records["s1"]["plan"]["steps"][1], lang)
+            self.assertEqual(body, exercise_text("breathe_square", lang))  # agreed with his specialist
+            self.assertIn(music, [t(lang, "calm.music", x=a) for a in artists])
+            self.assertEqual(told, t(lang, "nervous.told"))
+            self.assertEqual(calm_steps(mati, records["s3"]["plan"]["steps"][0], lang)[0], t(lang, "calm.breathe"))
+        st = Student(id="x", alias="Nadie", age=9, grade="4", persona="hermana", supports=["quiet_corner"],
+                     interests=[])
+        plan = plan_day(st, self.school.schedules["s3"], build_profile(st, self.qloo, ["Nadie"], Approvals()),
+                        Rotation(), Approvals())  # B1 arrival, B2 History, B3 recess
+        self.assertEqual(calm_steps(st, plan["steps"][1], "en")[1], t("en", "calm.corner"))
+        st.supports = ["headphones_noisy_breaks"]  # agreed for noisy breaks, not for class
+        self.assertEqual(calm_steps(st, plan["steps"][2], "en")[1], t("en", "calm.headphones"))
+        self.assertEqual(calm_steps(st, plan["steps"][1], "en")[1], t("en", "calm.ball"))
+
+    def test_the_teacher_the_specialist_and_the_family_read_it_the_principal_gets_a_count(self):
+        for lang in ("en", "es"):
+            records, _ = self.day(lang)
+            button = q(lang, t(lang, "nervous.button"))
+            calm = {sid: [c.activity for c in r["checkins"] if c.nervous] for sid, r in records.items()}
+            self.assertTrue(all(calm.values()))  # invented: the hard moments of the demo day
+            leo = "; ".join(calm["s1"])
+            self.assertIn(t(lang, "teacher.nervous", button=button, items=leo), self.report("a1", records, lang))
+            self.assertNotIn(t(lang, "teacher.nervous", button=button, items=leo), self.report("a2", records, lang))
+            self.assertIn(t(lang, "family.nervous", alias="Leo", items=leo), self.report("a5", records, lang))
+            specialist = self.report("a8", records, lang)
+            for sid in ("s1", "s3"):
+                self.assertIn(t(lang, "specialist.nervous", button=button, n=len(calm[sid]),
+                                items="; ".join(calm[sid])), specialist)
+            total = sum(len(v) for v in calm.values())
+            self.assertIn(t(lang, "principal.nervous", button=button, n=total),
+                          self.report("a4", records, lang).split("\n"))
 
 
 class TestOwnFavorites(Base):

@@ -33,6 +33,8 @@ MOVEMENT_SUPPORT = "movement_break"
 GENERIC_MOVES = ("move.stretch", "move.march", "move.errand")
 # Agreed supports that change how a reinforcement activity is given to the child.
 REINFORCE_ADAPT = ("one_instruction", "split_tasks")
+# The specialist's exercises that help a child calm down, offered first after "I feel nervous".
+CALM_EXERCISES = ("breathe_square", "wall_push", "hand_squeeze")
 FACES = ("bien", "mas_o_menos", "dificil")
 FACE_ICON = {"bien": "\U0001F600", "mas_o_menos": "\U0001F610", "dificil": "\U0001F61F"}
 
@@ -320,6 +322,7 @@ class CheckIn:
     face: str
     support_used: str = ""
     exercise_done: Optional[bool] = None  # the child's own answer; None if not asked or not told
+    nervous: bool = False  # the child pressed "I feel nervous" during this step
 
     def __post_init__(self) -> None:
         if self.face not in FACES:
@@ -341,8 +344,29 @@ def demo_checkins(student: Student, plan: Dict, day: int) -> List[CheckIn]:
             if fits:
                 support = fits[i % len(fits)]
         done = (code >= 3) if st.exercise else None
-        out.append(CheckIn(st.activity, face, support, done))
+        out.append(CheckIn(st.activity, face, support, done, nervous=face == "dificil"))
     return out
+
+
+def calm_steps(student: Student, step: Step, lang: str) -> List[str]:
+    """What Hermano offers, one at a time, when the child says "I feel nervous" during a step:
+    a calming exercise the child's specialist agreed (or breathing and counting), the child's
+    own approved music (or an agreed support that fits the moment, or the stress ball), and that
+    the teacher was told."""
+    body = next((exercise_text(e, lang) for e in student.exercises if e in CALM_EXERCISES), t(lang, "calm.breathe"))
+    plain = {t(lang, k) for k in ("calm.breathe", "calm.corner", "calm.ball")}
+    music = step.calm[0] if step.calm and step.calm[0] not in plain else ""
+    if "quiet_corner" in student.supports:
+        other = t(lang, "calm.corner")
+    elif "headphones_noisy_breaks" in student.supports and step.block.kind in SUPPORT_KINDS["headphones_noisy_breaks"]:
+        other = t(lang, "calm.headphones")
+    else:
+        other = t(lang, "calm.ball")
+    return [body, music or other, t(lang, "nervous.told")]
+
+
+def _nervous_button(lang: str) -> str:
+    return q(lang, t(lang, "nervous.button"))
 
 
 def _pairs(records: Dict, sid: str):
@@ -382,6 +406,9 @@ def _teacher(adult: Adult, school: School, records: Dict, sids: List[str], lang:
                 t(lang, "teacher.helped", activity=c.activity, support=support_text(c.support_used, lang))
                 if c.support_used else c.activity for s, c in hard)))
             out.append(t(lang, "teacher.tomorrow", activity=hard[0][1].activity))
+        nervous = [c.activity for s, c in pairs if c.nervous]
+        if nervous:
+            out.append(t(lang, "teacher.nervous", button=_nervous_button(lang), items="; ".join(nervous)))
         reads = [s.reading for s, c in pairs if s.reading]
         if reads:
             out.append(t(lang, "teacher.readings", items=" ".join(reads)))
@@ -417,6 +444,9 @@ def _principal(adult: Adult, school: School, records: Dict, sids: List[str], lan
     if supports:
         out.append(t(lang, "principal.supports", items="; ".join(
             f"{support_text(s, lang)} ({n})" for s, n in supports.most_common(3))))
+    nervous = sum(c.nervous for sid in sids for c in records[sid]["checkins"])
+    if nervous:
+        out.append(t(lang, "principal.nervous", button=_nervous_button(lang), n=nervous))
     out.append(t(lang, "principal.watch",
                  names=", ".join(attention) if attention else t(lang, "principal.nobody")))
     return out
@@ -439,6 +469,9 @@ def _family(adult: Adult, school: School, records: Dict, sids: List[str], lang: 
             extra = (t(lang, "family.helped", support=support_text(hard[0].support_used, lang))
                      if hard[0].support_used else "")
             out.append(t(lang, "family.hardest", activity=hard[0].activity) + extra)
+        nervous = [c.activity for s, c in pairs if c.nervous]
+        if nervous:
+            out.append(t(lang, "family.nervous", alias=st.alias, items="; ".join(nervous)))
         items = [s for s, c in pairs if s.reward_item and c.face == "bien"] or \
                 [s for s, c in pairs if s.reward_item]
         if items:
@@ -473,6 +506,10 @@ def _specialist(adult: Adult, school: School, records: Dict, sids: List[str], la
                      for s, c in _pairs(records, sid) if s.exercise]
         if practiced:
             out.append(t(lang, "specialist.exercises", items="; ".join(practiced)))
+        nervous = [c.activity for s, c in _pairs(records, sid) if c.nervous]
+        if nervous:
+            out.append(t(lang, "specialist.nervous", button=_nervous_button(lang), n=len(nervous),
+                         items="; ".join(nervous)))
     return out
 
 
