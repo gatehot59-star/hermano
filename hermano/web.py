@@ -5,7 +5,9 @@ language: the rule-based plan at once and then, if a Groq key is set, the agent'
 background. Both are kept in memory and in a private cache file (cache/plans, git-ignored like
 Qloo's answers), so judges opening the demo do not spend the free quota. Every visitor gets
 their own copy of the approvals and of the child's check-ins, kept in memory for a few hours,
-so judges do not change each other's demo. No scripts in the pages; standard library only.
+so judges do not change each other's demo. After a visitor's Yes, Hermano's rules plan that
+child's day again for that visitor only, from the Qloo answers already in memory: the idea
+they approved comes first. No scripts in the pages; standard library only.
 """
 from __future__ import annotations
 
@@ -28,9 +30,9 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
 from .agent import (FACE_ICON, FACES, Candidate, CheckIn, Rotation, Step, _show, build_profile,
-                    calm_steps, demo_checkins, plan_day, report_for, run_day)
+                    calm_steps, demo_checkins, motivators, plan_day, report_for, run_day)
 from .approvals import PENDING, Approvals
-from .i18n import DEFAULT_LANG, LANGS, pick, t
+from .i18n import DEFAULT_LANG, LANGS, note_words, pick, t
 from .llm import make_llm
 from .models import APPROVER_ROLES, ROLES, School, exercise_text, load_school
 from .planner import forbidden_names, llm_plan_day
@@ -44,6 +46,7 @@ MAX_SESSIONS = 2000
 MAX_BODY = 4096
 MAX_IDEAS_SHOWN = 3
 REFRESH_WHILE_PLANNING = 20  # seconds
+MAX_OWN_PLANS = 16  # a visitor's own replanned days kept in memory
 CSP = ("default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; "
        "frame-ancestors 'none'")
 Response = Tuple[int, List[Tuple[str, str]], bytes]
@@ -158,6 +161,8 @@ class Session:
         self.faces: Dict[str, Dict[int, str]] = {}
         self.did: Dict[str, Dict[int, bool]] = {}  # the child's own answer about each exercise
         self.nervous: Dict[str, set] = {}  # steps where the child pressed "I feel nervous"
+        self.approved: List[Tuple[str, str, str]] = []  # (child, domain, title) of each Yes, in order
+        self.own_plans: Dict[tuple, dict] = {}  # the child's day planned again after a Yes
         self.flash = ""
 
 
@@ -300,6 +305,42 @@ class App:
         else:
             work()
 
+    def _visitor_plan(self, day: dict, session: Session, sid: str) -> dict:
+        """The child's plan for this visitor. After their Yes, Hermano's rules plan the day
+        again with the ideas they approved first, from the same Qloo answers: nothing new is
+        asked to Qloo or to the language model. If those answers are not in memory (the
+        plans came from the cache file), the shared plan stays."""
+        shared = day["records"][sid]["plan"]
+        with self.lock:
+            mine = tuple((d, n) for s, d, n in session.approved if s == sid)
+            key = (day["date"], day["lang"], sid, mine)
+            cached = session.own_plans.get(key)
+        if not mine:
+            return shared
+        if cached is not None:
+            return cached
+        if not self.qloo_lock.acquire(timeout=2):
+            return shared
+        try:
+            profiles = self._profiles if self._profiles_date == day["date"] else None
+        finally:
+            self.qloo_lock.release()
+        if not profiles or sid not in profiles:
+            return shared
+        student, profile = self.school.students[sid], profiles[sid]
+        first = {(d, n.casefold()) for d, n in mine}
+        rotation = Rotation()  # every other motivator counts as already given: new ideas first
+        rotation.used[sid] = [(c.domain, c.name) for c in motivators(student, profile, session.approvals)
+                              if (c.domain, c.name.casefold()) not in first]
+        own = plan_day(student, self.school.schedules[sid], profile, rotation, session.approvals,
+                       day["lang"])
+        plan = dict(shared, steps=own["steps"], replanned=True)
+        with self.lock:
+            session.own_plans[key] = plan
+            while len(session.own_plans) > MAX_OWN_PLANS:
+                session.own_plans.pop(next(iter(session.own_plans)))
+        return plan
+
     # ---- visitors ----
 
     def _session(self, cookie_header: str) -> Tuple[Session, str]:
@@ -329,14 +370,15 @@ class App:
     def _records_for(self, day: dict, session: Session) -> Dict:
         """The day's records as this visitor sees them: their decisions and the child's faces."""
         out = {}
-        for sid, rec in day["records"].items():
+        for sid in day["records"]:
             def waiting(c: Candidate, sid: str = sid) -> bool:
                 return session.approvals.status(sid, c.domain, c.name) == PENDING
-            plan = dict(rec["plan"])
+            own = self._visitor_plan(day, session, sid)
+            plan = dict(own)
             plan["pending"] = [c for c in plan["pending"] if waiting(c)]
             plan["suggested"] = [x for x in plan.get("suggested", []) if waiting(x["candidate"])]
             told = session.faces.get(sid, {})
-            invented = demo_checkins(self.school.students[sid], rec["plan"], 0)
+            invented = demo_checkins(self.school.students[sid], own, 0)
             checkins = [CheckIn(c.activity, told[i], exercise_done=c.exercise_done) if i in told else c
                         for i, c in enumerate(invented)]
             did = session.did.get(sid, {})
@@ -444,9 +486,13 @@ class App:
             return t(lang, "web.building")
         if plans and all(p.get("planner") == "llm" for p in plans):
             return t(lang, "cli.planner.llm", model=plans[0].get("model", ""))
+        by_model = [p for p in plans if p.get("planner") == "llm"]
+        if by_model:  # say so when the model planned only some of the children
+            return t(lang, "cli.planner.mixed", model=by_model[0].get("model", ""),
+                     n=len(by_model), total=len(plans))
         notes = [p["planner_note"] for p in plans if p.get("planner_note")]
         if notes:
-            return t(lang, "cli.planner.fallback", reason=notes[0])
+            return t(lang, "cli.planner.fallback", reason=note_words(lang, notes[0]))
         return t(lang, "cli.planner.rules")
 
     def _home(self, lang: str) -> Response:
@@ -471,7 +517,7 @@ class App:
 
     def _child(self, lang: str, session: Session, sid: str) -> Response:
         """The child's own view. Only titles an adult approved; no suggestions, no reasons."""
-        plan = self.plans(lang)["records"][sid]["plan"]
+        plan = self._visitor_plan(self.plans(lang), session, sid)
         told = session.faces.get(sid, {})
         did = session.did.get(sid, {})
         nervous = session.nervous.get(sid, set())
@@ -516,7 +562,7 @@ class App:
         return self._html(200, lang, f"Hermano \u00b7 {alias}", "".join(parts), f"/child/{sid}")
 
     def _checkin(self, lang: str, session: Session, sid: str, form) -> Response:
-        steps = self.plans(lang)["records"][sid]["plan"]["steps"]
+        steps = self._visitor_plan(self.plans(lang), session, sid)["steps"]
         raw, face, did = _one(form, "step"), _one(form, "face"), _one(form, "did")
         if not (raw.isascii() and raw.isdigit() and len(raw) < 4) or int(raw) >= len(steps):
             return self._message(400, lang, "web.bad_request", f"/child/{sid}")
@@ -567,6 +613,9 @@ class App:
                  f"<p class='note'>{esc(t(lang, 'web.role.' + adult.role))} \u00b7 "
                  f"{esc(t(lang, 'web.your_children', names=names))}</p>",
                  f"<p class='note'>{esc(self._planner_line(day, lang))}</p>"]
+        again = [self.school.students[s].alias for s in sids if records[s]["plan"].get("replanned")]
+        if again:
+            parts.append(f"<p class='note'>{esc(t(lang, 'web.replanned', names=', '.join(again)))}</p>")
         if adult.role in APPROVER_ROLES:
             parts.append(f"<h2>{esc(t(lang, 'web.pending'))}</h2>")
             shown = False
@@ -618,10 +667,18 @@ class App:
         try:
             with self.lock:
                 session.approvals.decide(adult, sid, c.domain, c.name, ok == "1", c.entity_id)
-                session.flash = t(lang, "web.approved" if ok == "1" else "web.rejected",
-                                  item=_show(lang, c.domain, c.name))
+                if ok == "1":
+                    session.approved.append((sid, c.domain, c.name))
         except PermissionError:
             return self._message(403, lang, "web.forbidden", back)
+        key = "web.rejected"
+        if ok == "1":  # say "in the child's day" only if the child's view really shows it
+            steps = self._visitor_plan(self.plans(lang), session, sid)["steps"]
+            here = any(s.reward_domain == c.domain and s.reward_item.casefold() == c.name.casefold()
+                       for s in steps)
+            key = "web.approved" if here else "web.approved_saved"
+        with self.lock:
+            session.flash = t(lang, key, item=_show(lang, c.domain, c.name))
         return self._redirect(f"{back}?lang={lang}")
 
     def _privacy(self, lang: str) -> Response:
@@ -637,10 +694,20 @@ class App:
             session.reset(self.approvals_raw)
         return self._redirect(f"/?lang={lang}")
 
+    @staticmethod
+    def _served(day: dict) -> Tuple[str, int]:
+        """Who planned the day each child really gets: llm, rules or mixed, and how many
+        children the model planned. A build named llm can still be all rules."""
+        plans = [r["plan"] for r in day["records"].values()]
+        n = sum(1 for p in plans if p.get("planner") == "llm")
+        return ("llm" if plans and n == len(plans) else "mixed" if n else "rules"), n
+
     def _health(self) -> Response:
         with self.lock:
+            served = {lang: self._served(d) for lang, d in self.ready.items()}
             body = {"ok": True, "version": __version__, "today": self.today(),
-                    "ready": {lang: [d["date"], d["planner"]] for lang, d in self.ready.items()},
+                    "ready": {lang: [d["date"], served[lang][0]] for lang, d in self.ready.items()},
+                    "llm_children": {lang: served[lang][1] for lang in served},
                     "builds": dict(self.builds), "errors": len(self.errors),
                     "sessions": len(self.sessions)}
         return 200, [("Content-Type", "application/json")], json.dumps(body).encode("utf-8")
