@@ -59,7 +59,7 @@ TEXT: Dict[str, Dict[str, str]] = {
         "web.did_no": "Not today",
         "nervous.button": "I feel nervous",
         "nervous.title": "It's OK to feel nervous. One step at a time:",
-        "nervous.told": "I told your teacher.",
+        "nervous.told": "Your teacher will see this in today's report. If you need help now, raise your hand or show this screen to your teacher.",
         "nervous.flash": "I'm here with you.",
         "teacher.nervous": "Pressed {button} during: {items}",
         "specialist.nervous": "{button} today: {n} ({items})",
@@ -99,7 +99,11 @@ TEXT: Dict[str, Dict[str, str]] = {
         "suggested.family": "Hermano suggests these new ideas from Qloo for {alias}, waiting for your OK: {items}.",
         "cli.planner.rules": "Planner: rules (no language model)",
         "cli.planner.llm": "Planner: {model}, checked by Hermano's rules",
+        "cli.planner.mixed": "Planner: {model} for {n} of {total} children, Hermano's rules for the others",
         "cli.planner.fallback": "Planner: rules ({reason})",
+        "note.LLMUnavailable": "the language model did not answer",
+        "note.UnsafeText": "a privacy check stopped the language model",
+        "note.no_valid_plan": "the language model gave no valid plan",
         "specialist.title": "Observation log for {name}",
         "specialist.child": "{alias} \u00b7 {grade} \u00b7 agreed supports: {supports}",
         "specialist.header": "time | activity | how it went (self-report) | support used | motivator",
@@ -132,8 +136,10 @@ TEXT: Dict[str, Dict[str, str]] = {
         "web.for_child": "For {alias}",
         "web.yes": "Yes",
         "web.no": "No",
-        "web.approved": "Approved: {item}. Hermano uses it from tomorrow's plan.",
-        "web.rejected": "Rejected: {item}. Qloo will not suggest it again for this child.",
+        "web.approved": "Approved: {item}. It is in the child's day now.",
+        "web.approved_saved": "Approved: {item}. It is saved as approved for this child.",
+        "web.rejected": "Rejected: {item}. Hermano will not offer it to this child.",
+        "web.replanned": "After your Yes, Hermano's rules planned the day of {names} again, with the ideas you approved first. Nothing new was asked to Qloo or to the language model.",
         "web.none": "Nothing is waiting for your OK.",
         "web.report": "Today's report",
         "web.checkins": "{alias}: {told} of {n} check-ins told in this demo, the rest invented.",
@@ -193,7 +199,7 @@ TEXT: Dict[str, Dict[str, str]] = {
         "web.did_no": "Hoy no",
         "nervous.button": "Tengo nervios",
         "nervous.title": "Est\u00e1 bien tener nervios. Vamos de a un paso:",
-        "nervous.told": "Le avis\u00e9 a tu docente.",
+        "nervous.told": "Tu docente lo va a ver en el informe de hoy. Si necesit\u00e1s ayuda ahora, levant\u00e1 la mano o mostrale esta pantalla a tu docente.",
         "nervous.flash": "Estoy ac\u00e1 con vos.",
         "teacher.nervous": "Toc\u00f3 {button} en: {items}",
         "specialist.nervous": "{button} hoy: {n} ({items})",
@@ -233,7 +239,11 @@ TEXT: Dict[str, Dict[str, str]] = {
         "suggested.family": "Hermano sugiere estas ideas nuevas de Qloo para {alias}, esperando tu OK: {items}.",
         "cli.planner.rules": "Planificador: reglas (sin modelo de lenguaje)",
         "cli.planner.llm": "Planificador: {model}, revisado por las reglas de Hermano",
+        "cli.planner.mixed": "Planificador: {model} para {n} de {total} chicos, las reglas de Hermano para los dem\u00e1s",
         "cli.planner.fallback": "Planificador: reglas ({reason})",
+        "note.LLMUnavailable": "el modelo de lenguaje no respondi\u00f3",
+        "note.UnsafeText": "un control de privacidad fren\u00f3 al modelo de lenguaje",
+        "note.no_valid_plan": "el modelo de lenguaje no dio un plan v\u00e1lido",
         "specialist.title": "Registro de observaci\u00f3n para {name}",
         "specialist.child": "{alias} \u00b7 {grade} \u00b7 apoyos acordados: {supports}",
         "specialist.header": "hora | actividad | c\u00f3mo le fue (autoinforme) | apoyo usado | motivador",
@@ -266,8 +276,10 @@ TEXT: Dict[str, Dict[str, str]] = {
         "web.for_child": "Para {alias}",
         "web.yes": "S\u00ed",
         "web.no": "No",
-        "web.approved": "Aprobada: {item}. Hermano la usa desde el plan de ma\u00f1ana.",
-        "web.rejected": "Rechazada: {item}. Qloo no la vuelve a sugerir para este chico.",
+        "web.approved": "Aprobada: {item}. Ya est\u00e1 en el d\u00eda del chico.",
+        "web.approved_saved": "Aprobada: {item}. Qued\u00f3 guardada como aprobada para este chico.",
+        "web.rejected": "Rechazada: {item}. Hermano no se la va a ofrecer a este chico.",
+        "web.replanned": "Despu\u00e9s de tu S\u00ed, las reglas de Hermano volvieron a planear el d\u00eda de {names}, con lo que aprobaste primero. No se le pidi\u00f3 nada nuevo a Qloo ni al modelo de lenguaje.",
         "web.none": "No hay nada esperando tu OK.",
         "web.report": "El informe de hoy",
         "web.checkins": "{alias}: {told} de {n} momentos contados en esta demo, el resto inventados.",
@@ -289,6 +301,12 @@ def t(lang: str, key: str, **kw) -> str:
     """The text `key` in `lang`, filled in."""
     table = TEXT[lang] if lang in TEXT else TEXT[DEFAULT_LANG]
     return table[key].format(**kw)
+
+
+def note_words(lang: str, note: str) -> str:
+    """Why the rules planned a day (an error name or "no valid plan"), in words for people."""
+    table = TEXT[lang] if lang in TEXT else TEXT[DEFAULT_LANG]
+    return table.get("note." + note.replace(" ", "_"), note)
 
 
 def q(lang: str, title: str) -> str:
