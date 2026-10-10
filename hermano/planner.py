@@ -3,9 +3,10 @@
 The model works only with tools and the placeholder STUDENT_1. It can do two things:
 1. choose which adult-approved motivator follows each class or special block; a Qloo idea at
    most once a day, the child's own favorites again only when every other one was used;
-2. suggest up to two new ideas from Qloo's list for an adult to approve, with one sentence why.
-Every choice is checked in code: a reward after recess, an idea nobody approved or a reason with
-a health word is refused, and the model is told why. The child only ever sees titles an adult
+2. suggest up to two new ideas from Qloo's list for an adult to approve, with one sentence why
+   that names one of the child's own tastes Qloo started from.
+Every choice is checked in code: a reward after recess, an idea nobody approved, or a reason with
+a health word or without one of the child's tastes is refused, and the model is told why. The child only ever sees titles an adult
 approved; the model's own words reach adults' reports only. If the model is down or breaks a
 privacy rule, the rule-based plan stands.
 """
@@ -34,7 +35,8 @@ SYSTEM = ("You are Hermano's planner for one school day of one child, called STU
           "favorites (favorite: true) once every other motivator is used; never a reward after recess, "
           "arrival or dismissal; and at most "
           "{n} new ideas from the candidates (C ids), each with one short sentence in {language} "
-          "about why it fits the child's tastes. If submit_plan lists problems, fix them and "
+          "about why it fits the child's tastes, naming the one of child_tastes it connects to. "
+          "If submit_plan lists problems, fix them and "
           "submit again. When it is accepted, answer with the word done.")
 
 
@@ -84,6 +86,7 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
     b_ids = {f"B{i}": i - 1 for i in range(1, len(blocks) + 1)}
     used = {(d, n) for d, n in recent}
     favorites = {(c.domain, c.name) for c in profile.own}
+    tastes = [s for s in profile.signals if s.strip()]  # the child's interests Qloo started from
     assigned: Dict[int, Candidate] = {}
     suggested: List[dict] = []
 
@@ -103,7 +106,8 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
                               "favorite": (c.domain, c.name) in favorites}
                              for k, c in m_ids.items()],
                 "candidates": [{"id": k, "domain": c.domain, "title": c.name}
-                               for k, c in c_ids.items()]}
+                               for k, c in c_ids.items()],
+                "child_tastes": list(tastes)}
 
     def submit_plan(rewards=(), suggestions=()):
         problems: List[str] = []
@@ -134,6 +138,9 @@ def llm_plan_day(student: Student, blocks: List[Block], profile: TasteProfile,
                 break
             elif not reason or contains_health(reason) or contains_contact(reason):
                 problems.append(f"{cid}: the reason must be one sentence about tastes")
+            elif tastes and not any(x.casefold() in reason.casefold() for x in tastes):
+                problems.append(f"{cid}: the reason must name the child's taste it comes from, "
+                                f"one of: {', '.join(tastes)}")
             elif all(x["candidate"] is not c_ids[cid] for x in new_suggested):
                 new_suggested.append({"candidate": c_ids[cid], "reason": reason})
         assigned.clear()

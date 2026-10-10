@@ -30,7 +30,7 @@ def body(req):
     return json.loads(req.data.decode("utf-8"))
 
 
-REASON = "STUDENT_1 loves Peppa Pig, and Puffin Rock is a calm show about animals."
+REASON = "STUDENT_1 loves Bluey, and Puffin Rock is a calm show about animals."
 # Leo's day: B1 arrival, B2 Language, B3 recess, B4 Math, B5 move to Music, B6 Music, B7 dismissal.
 # Approved, in pool order: M1 Where the Wild Things Are, M2 Canticuenticos, M3 Peppa Pig,
 # M4 Animal Crossing, M5 Toy Story. Candidates: C1 The Little Prince, C2 Magdalena Fleitas,
@@ -209,7 +209,7 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(plan["suggested"], [])
 
     def test_at_most_two_suggestions(self):
-        many = [{"candidate_id": c, "reason": "fits the tastes"} for c in ("C1", "C2", "C3")]
+        many = [{"candidate_id": c, "reason": "fits the tastes of Bluey"} for c in ("C1", "C2", "C3")]
         plan = self.run_with(calls(("get_day", {}), ("get_motivators", {})),
                              calls(("submit_plan", {"rewards": GOOD, "suggestions": many})), done())
         self.assertEqual(len(plan["suggested"]), MAX_SUGGESTIONS)
